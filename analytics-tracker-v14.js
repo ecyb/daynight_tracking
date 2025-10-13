@@ -1,13 +1,14 @@
 /**
  * 🎬 Insight Stream Analytics Tracker with Session Recording
  * CDN-Ready Version - Complete Analytics + Session Replay
+ * FIXED VERSION - Handles 401 errors properly
  * 
  * Usage:
  * <script>
  *   window.__TRACKING_ID__ = 'your_tracking_id';
  *   window.__PROJECT_ID__ = 'your_project_id';
  * </script>
- * <script src="https://your-cdn.com/analytics-tracker-cdn.js"></script>
+ * <script src="https://your-cdn.com/analytics-tracker-cdn-fixed.js"></script>
  */
 
 (function() {
@@ -44,7 +45,7 @@
   var isRecording = false;
   var sessionStartTime = Date.now();
 
-  console.log('🎬 Insight Stream Analytics Tracker loaded');
+  console.log('🎬 Insight Stream Analytics Tracker loaded (Fixed Version)');
   console.log('📊 Tracking ID:', trackingId);
   console.log('🎯 Project ID:', projectId);
   console.log('📹 Session Recording: Available');
@@ -86,6 +87,23 @@
     };
   }
 
+  // Enhanced fetch with error handling
+  function safeFetch(url, options) {
+    return fetch(url, options)
+      .then(function(response) {
+        if (!response.ok) {
+          console.log('📊 API Error:', response.status, response.statusText, 'for', url);
+          // Don't throw error, just log it and continue
+          return { ok: false, status: response.status };
+        }
+        return response;
+      })
+      .catch(function(error) {
+        console.log('📊 Network Error:', error.message, 'for', url);
+        return { ok: false, error: error };
+      });
+  }
+
   // Core Tracking Function
   function track(eventType, data) {
     var utmParams = getUTMParams();
@@ -104,15 +122,17 @@
       device: deviceInfo
     };
 
-    // Send to analytics API
-    fetch(apiUrl, {
+    // Send to analytics API with error handling
+    safeFetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload)
-    }).catch(function(error) {
-      console.log('📊 Analytics tracking error:', error);
+    }).then(function(response) {
+      if (response.ok) {
+        console.log('📊 Event tracked:', eventType);
+      }
     });
   }
 
@@ -182,17 +202,17 @@
       timestamp: new Date().toISOString()
     };
 
-    fetch(sessionReplayUrl, {
+    safeFetch(sessionReplayUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload)
-    }).then(function() {
-      console.log('📹 Session replay data sent:', sessionReplayBuffer.length, 'events');
-      sessionReplayBuffer = [];
-    }).catch(function(error) {
-      console.log('📹 Session replay error:', error);
+    }).then(function(response) {
+      if (response.ok) {
+        console.log('📹 Session replay data sent:', sessionReplayBuffer.length, 'events');
+        sessionReplayBuffer = [];
+      }
     });
   }
 
@@ -208,8 +228,8 @@
       return;
     }
 
-    // Check database setting
-    fetch(checkRecordingUrl, {
+    // Check database setting with error handling
+    safeFetch(checkRecordingUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -219,9 +239,16 @@
         tracking_id: trackingId
       })
     })
-    .then(function(response) { return response.json(); })
+    .then(function(response) {
+      if (response.ok) {
+        return response.json();
+      } else {
+        console.log("📹 Could not check session recording status (API error), using localStorage fallback");
+        return { enabled: false };
+      }
+    })
     .then(function(data) {
-      if (data.enabled) {
+      if (data && data.enabled) {
         console.log("🎥 Session recording enabled for project, starting session replay");
         startSessionReplay();
       } else {
@@ -332,17 +359,17 @@
       timestamp: new Date().toISOString()
     };
 
-    fetch(behaviorUrl, {
+    safeFetch(behaviorUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload)
-    }).then(function() {
-      console.log('📊 Behavior data sent:', behaviorBuffer.length, 'events');
-      behaviorBuffer = [];
-    }).catch(function(error) {
-      console.log('📊 Behavior tracking error:', error);
+    }).then(function(response) {
+      if (response.ok) {
+        console.log('📊 Behavior data sent:', behaviorBuffer.length, 'events');
+        behaviorBuffer = [];
+      }
     });
   }
 
@@ -470,7 +497,7 @@
       }
     },
     getSessionId: getSessionId,
-    version: '2.0.0-cdn'
+    version: '2.0.1-cdn-fixed'
   };
 
   // Auto-initialize when DOM is ready
@@ -484,8 +511,9 @@
     initializeSessionReplay();
   }
 
-  console.log('🎬 Insight Stream Analytics Tracker v2.0.0 CDN Ready');
+  console.log('🎬 Insight Stream Analytics Tracker v2.0.1 CDN Ready (Fixed)');
   console.log('📊 Use window.InsightStream.track() for custom events');
   console.log('🎥 Use window.InsightStream.enableSessionRecording() to enable recording');
+  console.log('🔧 Fixed: Handles 401 errors gracefully with localStorage fallback');
 
 })(window);
