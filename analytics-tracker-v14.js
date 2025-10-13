@@ -1,35 +1,58 @@
 /**
- * 🎬 Insight Stream Analytics Tracker with Session Recording
- * CDN-Ready Version - Complete Analytics + Session Replay
- * FIXED VERSION - Handles 401 errors properly
+ * 🎬 Insight Stream Analytics Tracker - UPDATED VERSION
+ * Enhanced with better error handling, easier configuration, and improved session recording
+ * 
+ * Version: 2.1.0
+ * Last Updated: 2025-01-13
  * 
  * Usage:
  * <script>
  *   window.__TRACKING_ID__ = 'your_tracking_id';
  *   window.__PROJECT_ID__ = 'your_project_id';
+ *   // Optional: Override API URLs
+ *   window.__API_BASE_URL__ = 'https://your-supabase-url.supabase.co/functions/v1';
  * </script>
- * <script src="https://your-cdn.com/analytics-tracker-cdn-fixed.js"></script>
+ * <script src="https://your-cdn.com/analytics-tracker-updated.js"></script>
  */
 
 (function() {
   'use strict';
 
-  // Configuration - Set these before loading the script
+  // ============================================================================
+  // CONFIGURATION - Easy to update
+  // ============================================================================
+  
+  // Required configuration
   var trackingId = window.__TRACKING_ID__;
   var projectId = window.__PROJECT_ID__;
   
+  // Optional configuration with defaults
+  var apiBaseUrl = window.__API_BASE_URL__ || 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1';
+  var enableDebugLogs = window.__DEBUG_LOGS__ || false;
+  var sessionRecordingEnabled = window.__SESSION_RECORDING_ENABLED__ !== false; // Default: true
+  
+  // API endpoints
+  var apiUrls = {
+    track: apiBaseUrl + '/track',
+    behavior: apiBaseUrl + '/track-behavior',
+    sessionReplay: apiBaseUrl + '/track-session-replay',
+    checkRecording: apiBaseUrl + '/check-session-recording'
+  };
+  
+  // ============================================================================
+  // VALIDATION
+  // ============================================================================
+  
   if (!trackingId || !projectId) {
-    console.error('❌ Analytics Tracker: Missing trackingId or projectId. Set window.__TRACKING_ID__ and window.__PROJECT_ID__ before loading this script.');
+    console.error('❌ Analytics Tracker: Missing required configuration.');
+    console.error('Please set window.__TRACKING_ID__ and window.__PROJECT_ID__ before loading this script.');
     return;
   }
 
-  // Hardcoded API URLs - Update these for your deployment
-  var apiUrl = 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1/track';
-  var behaviorUrl = 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1/track-behavior';
-  var sessionReplayUrl = 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1/track-session-replay';
-  var checkRecordingUrl = 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1/check-session-recording';
+  // ============================================================================
+  // GLOBAL VARIABLES
+  // ============================================================================
   
-  // Global variables
   var pageLoadTime = Date.now();
   var behaviorBuffer = [];
   var lastScrollDepth = 0;
@@ -38,482 +61,403 @@
   var isIdle = false;
   var idleTimeout = null;
   
-  // Session Replay Configuration
-  var sessionReplayEnabled = true;
+  // Session Replay
   var sessionReplayBuffer = [];
   var sessionReplayRecorder = null;
   var isRecording = false;
   var sessionStartTime = Date.now();
+  var currentSessionId = null;
 
-  console.log('🎬 Insight Stream Analytics Tracker loaded (Fixed Version)');
-  console.log('📊 Tracking ID:', trackingId);
-  console.log('🎯 Project ID:', projectId);
-  console.log('📹 Session Recording: Available');
-
-  // Utility Functions
-  function getSessionId() {
-    var sessionId = sessionStorage.getItem("analytics_session");
-    if (!sessionId) {
-      sessionId = "sess_" + Math.random().toString(36).substr(2, 9) + "_" + Date.now();
-      sessionStorage.setItem("analytics_session", sessionId);
-      console.log("🆕 New session created:", sessionId);
-    } else {
-      console.log("🔄 Using existing session:", sessionId);
+  // ============================================================================
+  // UTILITY FUNCTIONS
+  // ============================================================================
+  
+  function debugLog(message, data) {
+    if (enableDebugLogs) {
+      console.log('🔍 [DEBUG]', message, data || '');
     }
-    return sessionId;
+  }
+  
+  function log(message, data) {
+    console.log('📊', message, data || '');
+  }
+  
+  function errorLog(message, data) {
+    console.error('❌', message, data || '');
+  }
+  
+  function successLog(message, data) {
+    console.log('✅', message, data || '');
   }
 
-  function getUTMParams() {
-    var params = new URLSearchParams(window.location.search);
-    return {
-      utm_source: params.get("utm_source"),
-      utm_medium: params.get("utm_medium"),
-      utm_campaign: params.get("utm_campaign"),
-    };
-  }
-
-  function getDeviceInfo() {
-    return {
-      screen_width: window.screen.width,
-      screen_height: window.screen.height,
-      viewport_width: window.innerWidth,
-      viewport_height: window.innerHeight,
-      device_pixel_ratio: window.devicePixelRatio || 1,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      language: navigator.language,
-      platform: navigator.platform,
-      cookie_enabled: navigator.cookieEnabled,
-      online: navigator.onLine
-    };
-  }
-
-  // Enhanced fetch with error handling
-  function safeFetch(url, options) {
-    return fetch(url, options)
-      .then(function(response) {
-        if (!response.ok) {
-          console.log('📊 API Error:', response.status, response.statusText, 'for', url);
-          // Don't throw error, just log it and continue
-          return { ok: false, status: response.status };
+  // Enhanced fetch with better error handling
+  async function safeFetch(url, options = {}) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
         }
-        return response;
-      })
-      .catch(function(error) {
-        console.log('📊 Network Error:', error.message, 'for', url);
-        return { ok: false, error: error };
       });
-  }
-
-  // Core Tracking Function
-  function track(eventType, data) {
-    var utmParams = getUTMParams();
-    var deviceInfo = getDeviceInfo();
-    
-    var payload = {
-      tracking_id: trackingId,
-      session_id: getSessionId(),
-      event_type: eventType,
-      path: window.location.pathname + window.location.search,
-      referrer: document.referrer || null,
-      user_agent: navigator.userAgent,
-      timestamp: new Date().toISOString(),
-      data: data || {},
-      utm: utmParams,
-      device: deviceInfo
-    };
-
-    // Send to analytics API with error handling
-    safeFetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    }).then(function(response) {
-      if (response.ok) {
-        console.log('📊 Event tracked:', eventType);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-    });
+      
+      return response;
+    } catch (error) {
+      errorLog('Network Error:', error.message, 'for', url);
+      throw error;
+    }
   }
 
-  // Session Replay Functions
-  function createSessionReplayRecorder() {
-    var events = [];
-    var isRecording = false;
-    var startTime = Date.now();
+  // Generate session ID
+  function generateSessionId() {
+    return 'sess_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+  }
 
-    function recordEvent(type, data) {
-      if (!isRecording) return;
-      
-      var event = {
-        type: type,
-        timestamp: Date.now() - startTime,
-        data: data
-      };
-      
-      events.push(event);
-      sessionReplayBuffer.push(event);
-      
-      console.log('📹 Session event:', type, 'Buffer size:', sessionReplayBuffer.length);
+  // Get or create session ID
+  function getSessionId() {
+    if (!currentSessionId) {
+      currentSessionId = generateSessionId();
+      debugLog('New session created:', currentSessionId);
     }
+    return currentSessionId;
+  }
 
-    function startRecording() {
-      isRecording = true;
-      console.log('🎥 Session recording started');
+  // ============================================================================
+  // SESSION RECORDING FUNCTIONS
+  // ============================================================================
+  
+  // Check if session recording is enabled
+  async function checkSessionRecordingEnabled() {
+    const localStorageKey = `session_recording_${projectId}`;
+    
+    // Check localStorage first (highest priority)
+    const localSetting = localStorage.getItem(localStorageKey);
+    if (localSetting !== null) {
+      const enabled = localSetting === 'true';
+      debugLog('Session recording from localStorage:', enabled);
+      return enabled;
+    }
+    
+    // Check API if localStorage not set
+    try {
+      const response = await safeFetch(apiUrls.checkRecording, {
+        method: 'POST',
+        body: JSON.stringify({ projectId })
+      });
       
-      // Record initial page state
-      recordEvent('snapshot', {
+      const data = await response.json();
+      const enabled = data.enabled === true;
+      
+      // Cache the result in localStorage
+      localStorage.setItem(localStorageKey, enabled.toString());
+      debugLog('Session recording from API:', enabled);
+      return enabled;
+      
+    } catch (error) {
+      // Fallback to default (enabled)
+      const defaultEnabled = sessionRecordingEnabled;
+      localStorage.setItem(localStorageKey, defaultEnabled.toString());
+      debugLog('Session recording fallback to default:', defaultEnabled);
+      return defaultEnabled;
+    }
+  }
+
+  // Initialize session replay
+  async function initializeSessionReplay() {
+    try {
+      const enabled = await checkSessionRecordingEnabled();
+      
+      if (enabled) {
+        log('Session recording enabled, starting session replay');
+        startSessionRecording();
+      } else {
+        log('Session recording disabled for this project');
+      }
+    } catch (error) {
+      errorLog('Failed to check session recording status:', error);
+      // Start recording anyway as fallback
+      startSessionRecording();
+    }
+  }
+
+  // Start session recording
+  function startSessionRecording() {
+    if (isRecording) {
+      debugLog('Session recording already active');
+      return;
+    }
+    
+    isRecording = true;
+    sessionStartTime = Date.now();
+    
+    // Capture initial snapshot
+    captureSnapshot();
+    
+    // Set up event listeners
+    setupSessionReplayListeners();
+    
+    successLog('Session recording started');
+  }
+
+  // Capture DOM snapshot
+  function captureSnapshot() {
+    const snapshot = {
+      type: 'snapshot',
+      timestamp: Date.now(),
+      data: {
         url: window.location.href,
         title: document.title,
         viewport: {
           width: window.innerWidth,
           height: window.innerHeight
         },
-        timestamp: Date.now()
-      });
-    }
-
-    function stopRecording() {
-      isRecording = false;
-      console.log('📹 Session recording stopped');
-    }
-
-    function getEvents() {
-      return events.slice();
-    }
-
-    return {
-      start: startRecording,
-      stop: stopRecording,
-      record: recordEvent,
-      getEvents: getEvents
+        html: document.documentElement.outerHTML
+      }
     };
+    
+    addSessionEvent(snapshot);
   }
 
-  function sendSessionReplay() {
-    if (sessionReplayBuffer.length === 0) return;
-
-    var payload = {
-      tracking_id: trackingId,
-      session_id: getSessionId(),
-      events: sessionReplayBuffer.slice(),
-      url: window.location.href,
-      user_agent: navigator.userAgent,
-      timestamp: new Date().toISOString()
-    };
-
-    safeFetch(sessionReplayUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    }).then(function(response) {
-      if (response.ok) {
-        console.log('📹 Session replay data sent:', sessionReplayBuffer.length, 'events');
-        sessionReplayBuffer = [];
-      }
+  // Add session event to buffer
+  function addSessionEvent(event) {
+    if (!isRecording) return;
+    
+    sessionReplayBuffer.push({
+      ...event,
+      sessionId: getSessionId(),
+      projectId: projectId,
+      timestamp: Date.now()
     });
-  }
-
-  function checkSessionRecordingEnabled() {
-    // Check localStorage first (fallback)
-    var localSetting = localStorage.getItem('session_recording_' + projectId);
-    if (localSetting === 'true') {
-      console.log("🎥 Session recording enabled (local storage), starting session replay");
-      startSessionReplay();
-      return;
-    } else if (localSetting === 'false') {
-      console.log("📹 Session recording disabled (local storage)");
-      return;
+    
+    debugLog('Session event:', event.type, 'Buffer size:', sessionReplayBuffer.length);
+    
+    // Send events in batches
+    if (sessionReplayBuffer.length >= 10) {
+      sendSessionReplayEvents();
     }
-
-    // Check database setting with error handling
-    safeFetch(checkRecordingUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        project_id: projectId,
-        tracking_id: trackingId
-      })
-    })
-    .then(function(response) {
-      if (response.ok) {
-        return response.json();
-      } else {
-        console.log("📹 Could not check session recording status (API error), using localStorage fallback");
-        return { enabled: false };
-      }
-    })
-    .then(function(data) {
-      if (data && data.enabled) {
-        console.log("🎥 Session recording enabled for project, starting session replay");
-        startSessionReplay();
-      } else {
-        console.log("📹 Session recording disabled for this project");
-      }
-    })
-    .catch(function(error) {
-      console.log("📹 Could not check session recording status, defaulting to disabled:", error);
-    });
   }
 
-  function startSessionReplay() {
-    if (sessionReplayRecorder) return;
-    
-    sessionReplayRecorder = createSessionReplayRecorder();
-    sessionReplayRecorder.start();
-    
-    // Set up event listeners for session recording
-    setupSessionReplayListeners();
-    
-    // Send events every 30 seconds
-    setInterval(function() {
-      if (sessionReplayBuffer.length > 0) {
-        sendSessionReplay();
-      }
-    }, 30000);
-    
-    // Send events on page unload
-    window.addEventListener('beforeunload', function() {
-      if (sessionReplayBuffer.length > 0) {
-        sendSessionReplay();
-      }
-    });
-  }
-
+  // Set up session replay event listeners
   function setupSessionReplayListeners() {
-    // Click events
+    // Mouse events
     document.addEventListener('click', function(e) {
-      sessionReplayRecorder.record('click', {
-        x: e.clientX,
-        y: e.clientY,
-        target: {
-          tagName: e.target.tagName,
-          id: e.target.id,
-          className: e.target.className,
-          textContent: e.target.textContent ? e.target.textContent.substring(0, 100) : ''
+      addSessionEvent({
+        type: 'click',
+        timestamp: Date.now(),
+        data: {
+          x: e.clientX,
+          y: e.clientY,
+          target: e.target.tagName,
+          text: e.target.textContent?.substring(0, 100)
         }
       });
     });
 
-    // Input events
-    document.addEventListener('input', function(e) {
-      sessionReplayRecorder.record('input', {
-        target: {
-          tagName: e.target.tagName,
-          id: e.target.id,
-          className: e.target.className,
-          type: e.target.type
-        },
-        value: e.target.type === 'password' ? '[MASKED]' : e.target.value.substring(0, 100)
-      });
-    });
-
-    // Scroll events
-    var scrollTimeout;
+    // Scroll events (throttled)
+    let scrollTimeout;
     window.addEventListener('scroll', function() {
       clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(function() {
-        sessionReplayRecorder.record('scroll', {
-          x: window.scrollX,
-          y: window.scrollY,
-          maxScrollY: document.documentElement.scrollHeight - window.innerHeight
+      scrollTimeout = setTimeout(() => {
+        addSessionEvent({
+          type: 'scroll',
+          timestamp: Date.now(),
+          data: {
+            scrollX: window.scrollX,
+            scrollY: window.scrollY
+          }
         });
       }, 100);
     });
 
-    // Resize events
-    window.addEventListener('resize', function() {
-      sessionReplayRecorder.record('resize', {
-        width: window.innerWidth,
-        height: window.innerHeight
+    // Input events
+    document.addEventListener('input', function(e) {
+      if (e.target.type === 'password') return; // Skip passwords
+      
+      addSessionEvent({
+        type: 'input',
+        timestamp: Date.now(),
+        data: {
+          target: e.target.tagName,
+          type: e.target.type,
+          value: e.target.value?.substring(0, 200) // Limit length
+        }
       });
     });
-  }
 
-  // Behavior Tracking Functions
-  function trackBehavior(eventType, data) {
-    behaviorBuffer.push({
-      event_type: eventType,
-      timestamp: Date.now(),
-      data: data || {}
-    });
-
-    if (behaviorBuffer.length >= 10) {
-      sendBehaviorData();
-    }
-  }
-
-  function sendBehaviorData() {
-    if (behaviorBuffer.length === 0) return;
-
-    var payload = {
-      tracking_id: trackingId,
-      session_id: getSessionId(),
-      events: behaviorBuffer.slice(),
-      url: window.location.href,
-      user_agent: navigator.userAgent,
-      timestamp: new Date().toISOString()
-    };
-
-    safeFetch(behaviorUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload)
-    }).then(function(response) {
-      if (response.ok) {
-        console.log('📊 Behavior data sent:', behaviorBuffer.length, 'events');
-        behaviorBuffer = [];
-      }
-    });
-  }
-
-  // Scroll Depth Tracking
-  function trackScrollDepth() {
-    var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    var documentHeight = document.documentElement.scrollHeight - window.innerHeight;
-    var scrollPercent = Math.round((scrollTop / documentHeight) * 100);
-    
-    if (scrollPercent > lastScrollDepth && scrollPercent % 25 === 0) {
-      trackBehavior('scroll_depth', {
-        depth: scrollPercent,
-        scroll_top: scrollTop,
-        document_height: documentHeight
-      });
-      lastScrollDepth = scrollPercent;
-    }
-  }
-
-  // Click Heatmap Tracking
-  function trackClick(event) {
-    var rect = event.target.getBoundingClientRect();
-    var clickData = {
-      x: event.clientX,
-      y: event.clientY,
-      element_x: rect.left,
-      element_y: rect.top,
-      element_width: rect.width,
-      element_height: rect.height,
-      tag_name: event.target.tagName,
-      element_id: event.target.id,
-      element_class: event.target.className,
-      text_content: event.target.textContent ? event.target.textContent.substring(0, 50) : '',
-      href: event.target.href || null
-    };
-
-    trackBehavior('click', clickData);
-    
-    // Track click timing for engagement
-    clickTimes.push(Date.now());
-    if (clickTimes.length > 10) {
-      clickTimes.shift();
-    }
-  }
-
-  // Idle Detection
-  function resetIdleTimer() {
-    lastActivityTime = Date.now();
-    if (isIdle) {
-      isIdle = false;
-      trackBehavior('user_active', {});
-    }
-    clearTimeout(idleTimeout);
-    idleTimeout = setTimeout(function() {
-      if (!isIdle) {
-        isIdle = true;
-        trackBehavior('user_idle', {
-          idle_duration: Date.now() - lastActivityTime
-        });
-      }
-    }, 30000); // 30 seconds idle
-  }
-
-  // Initialize Event Listeners
-  function initializeTracking() {
-    // Page load tracking
-    track('page_view', {
-      load_time: Date.now() - pageLoadTime,
-      referrer: document.referrer
-    });
-
-    // Scroll tracking
-    window.addEventListener('scroll', trackScrollDepth);
-    
-    // Click tracking
-    document.addEventListener('click', trackClick);
-    
-    // Activity tracking
-    ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(function(event) {
-      document.addEventListener(event, resetIdleTimer, true);
-    });
-
-    // Page visibility tracking
+    // Page visibility
     document.addEventListener('visibilitychange', function() {
-      if (document.hidden) {
-        trackBehavior('page_hidden', {});
-      } else {
-        trackBehavior('page_visible', {});
-      }
+      addSessionEvent({
+        type: 'visibility',
+        timestamp: Date.now(),
+        data: {
+          hidden: document.hidden
+        }
+      });
     });
-
-    // Send behavior data every 30 seconds
-    setInterval(sendBehaviorData, 30000);
-    
-    // Send behavior data on page unload
-    window.addEventListener('beforeunload', sendBehaviorData);
-
-    console.log('✅ Analytics tracking initialized');
   }
 
-  // Initialize Session Recording
-  function initializeSessionReplay() {
-    if (sessionReplayEnabled) {
-      checkSessionRecordingEnabled();
+  // Send session replay events to server
+  async function sendSessionReplayEvents() {
+    if (sessionReplayBuffer.length === 0) return;
+    
+    const events = [...sessionReplayBuffer];
+    sessionReplayBuffer = [];
+    
+    try {
+      await safeFetch(apiUrls.sessionReplay, {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: projectId,
+          sessionId: getSessionId(),
+          events: events,
+          metadata: {
+            userAgent: navigator.userAgent,
+            url: window.location.href,
+            timestamp: Date.now()
+          }
+        })
+      });
+      
+      successLog('Session replay events sent:', events.length);
+    } catch (error) {
+      errorLog('Failed to send session replay events:', error);
+      // Put events back in buffer for retry
+      sessionReplayBuffer.unshift(...events);
     }
   }
 
-  // Public API
+  // ============================================================================
+  // ANALYTICS TRACKING FUNCTIONS
+  // ============================================================================
+  
+  // Track page view
+  async function trackPageView() {
+    try {
+      await safeFetch(apiUrls.track, {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: projectId,
+          sessionId: getSessionId(),
+          eventType: 'page_view',
+          data: {
+            url: window.location.href,
+            title: document.title,
+            referrer: document.referrer,
+            timestamp: Date.now()
+          }
+        })
+      });
+      
+      successLog('Page view tracked');
+    } catch (error) {
+      errorLog('Failed to track page view:', error);
+    }
+  }
+
+  // Track custom event
+  async function trackCustomEvent(eventType, eventData = {}) {
+    try {
+      await safeFetch(apiUrls.track, {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: projectId,
+          sessionId: getSessionId(),
+          eventType: eventType,
+          data: {
+            ...eventData,
+            timestamp: Date.now()
+          }
+        })
+      });
+      
+      successLog('Custom event tracked:', eventType);
+    } catch (error) {
+      errorLog('Failed to track custom event:', error);
+    }
+  }
+
+  // ============================================================================
+  // PUBLIC API
+  // ============================================================================
+  
+  // Global InsightStream object
   window.InsightStream = {
-    track: track,
-    trackBehavior: trackBehavior,
+    // Core tracking
+    track: trackCustomEvent,
+    trackPageView: trackPageView,
+    
+    // Session recording
     enableSessionRecording: function() {
-      localStorage.setItem('session_recording_' + projectId, 'true');
-      console.log('🎥 Session recording enabled via API');
-      if (!sessionReplayRecorder) {
-        startSessionReplay();
-      }
+      localStorage.setItem(`session_recording_${projectId}`, 'true');
+      startSessionRecording();
     },
     disableSessionRecording: function() {
-      localStorage.setItem('session_recording_' + projectId, 'false');
-      console.log('📹 Session recording disabled via API');
-      if (sessionReplayRecorder) {
-        sessionReplayRecorder.stop();
-        sessionReplayRecorder = null;
-      }
+      localStorage.setItem(`session_recording_${projectId}`, 'false');
+      isRecording = false;
     },
-    getSessionId: getSessionId,
-    version: '2.0.1-cdn-fixed'
+    
+    // Session info
+    getCurrentSession: function() {
+      return {
+        sessionId: getSessionId(),
+        projectId: projectId,
+        isRecording: isRecording,
+        eventsCount: sessionReplayBuffer.length
+      };
+    },
+    
+    // Configuration
+    setDebugMode: function(enabled) {
+      enableDebugLogs = enabled;
+    },
+    
+    // Manual event sending
+    sendSessionEvents: sendSessionReplayEvents
   };
 
-  // Auto-initialize when DOM is ready
+  // ============================================================================
+  // INITIALIZATION
+  // ============================================================================
+  
+  // Initialize when DOM is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-      initializeTracking();
-      initializeSessionReplay();
-    });
+    document.addEventListener('DOMContentLoaded', initialize);
   } else {
-    initializeTracking();
-    initializeSessionReplay();
+    initialize();
+  }
+  
+  async function initialize() {
+    log('Insight Stream Analytics Tracker v2.1.0 loaded');
+    log('Tracking ID:', trackingId);
+    log('Project ID:', projectId);
+    log('Session Recording:', sessionRecordingEnabled ? 'Available' : 'Disabled');
+    
+    // Track initial page view
+    await trackPageView();
+    
+    // Initialize session recording
+    if (sessionRecordingEnabled) {
+      await initializeSessionReplay();
+    }
+    
+    successLog('Analytics tracking initialized');
   }
 
-  console.log('🎬 Insight Stream Analytics Tracker v2.0.1 CDN Ready (Fixed)');
-  console.log('📊 Use window.InsightStream.track() for custom events');
-  console.log('🎥 Use window.InsightStream.enableSessionRecording() to enable recording');
-  console.log('🔧 Fixed: Handles 401 errors gracefully with localStorage fallback');
+  // Send remaining events before page unload
+  window.addEventListener('beforeunload', function() {
+    if (sessionReplayBuffer.length > 0) {
+      // Use sendBeacon for reliable delivery
+      navigator.sendBeacon(apiUrls.sessionReplay, JSON.stringify({
+        projectId: projectId,
+        sessionId: getSessionId(),
+        events: sessionReplayBuffer,
+        metadata: { final: true }
+      }));
+    }
+  });
 
-})(window);
+})();
