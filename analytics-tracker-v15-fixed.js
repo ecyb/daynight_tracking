@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - V15 FIXED
  * Complete fix for 404/401 errors with proper endpoint handling
  * 
- * Version: 2.2.0
- * Last Updated: 2025-01-13
+ * Version: 2.2.1
+ * Last Updated: 2025-01-14
  * 
  * Usage:
  * <script>
@@ -35,11 +35,11 @@
   // Use the correct Supabase endpoints that actually exist
   var apiBaseUrl = 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1';
   var apiUrls = {
-    // Use the existing track-behavior endpoint for all tracking
-    track: apiBaseUrl + '/track-behavior',
+    // Use the correct track endpoint for pageviews (this inserts into pageviews table)
+    track: apiBaseUrl + '/track',
     behavior: apiBaseUrl + '/track-behavior',
-    sessionReplay: apiBaseUrl + '/track-behavior', // Use same endpoint
-    checkRecording: apiBaseUrl + '/track-behavior' // Use same endpoint
+    sessionReplay: apiBaseUrl + '/track-session-replay',
+    checkRecording: apiBaseUrl + '/check-session-recording'
   };
 
   // ============================================================================
@@ -138,8 +138,7 @@
       const response = await safeFetch(apiUrls.checkRecording, {
         method: 'POST',
         body: JSON.stringify({ 
-          projectId: projectId,
-          type: 'check_recording'
+          tracking_id: trackingId
         })
       });
       
@@ -295,7 +294,6 @@
           projectId: projectId,
           sessionId: getSessionId(),
           events: events,
-          type: 'session_replay',
           metadata: {
             userAgent: navigator.userAgent,
             url: window.location.href,
@@ -327,15 +325,19 @@
       const response = await safeFetch(apiUrls.track, {
         method: 'POST',
         body: JSON.stringify({
-          projectId: projectId,
-          sessionId: getSessionId(),
-          type: 'page_view',
-          data: {
-            url: window.location.href,
-            title: document.title,
-            referrer: document.referrer,
-            timestamp: Date.now()
-          }
+          tracking_id: trackingId,
+          session_id: getSessionId(),
+          event_type: 'pageview',
+          path: window.location.pathname + window.location.search,
+          referrer: document.referrer,
+          user_agent: navigator.userAgent,
+          screen_width: screen.width,
+          screen_height: screen.height,
+          viewport_width: window.innerWidth,
+          viewport_height: window.innerHeight,
+          language: navigator.language,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          duration: null
         })
       });
       
@@ -355,13 +357,16 @@
       const response = await safeFetch(apiUrls.track, {
         method: 'POST',
         body: JSON.stringify({
-          projectId: projectId,
-          sessionId: getSessionId(),
-          type: eventType,
-          data: {
+          tracking_id: trackingId,
+          session_id: getSessionId(),
+          event_type: 'event',
+          event_name: eventType,
+          event_data: {
             ...eventData,
             timestamp: Date.now()
-          }
+          },
+          path: window.location.pathname + window.location.search,
+          user_agent: navigator.userAgent
         })
       });
       
@@ -444,7 +449,6 @@
           projectId: projectId,
           sessionId: getSessionId(),
           events: sessionReplayBuffer,
-          type: 'session_replay',
           metadata: { final: true }
         }));
       } catch (error) {
