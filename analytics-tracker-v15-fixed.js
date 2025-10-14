@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - V15 FIXED
  * Complete fix for 404/401 errors with proper endpoint handling
  * 
- * Version: 2.2.1
+ * Version: 2.2.2
  * Last Updated: 2025-01-14
  * 
  * Usage:
@@ -221,8 +221,6 @@
     
     sessionReplayBuffer.push({
       ...event,
-      sessionId: getSessionId(),
-      projectId: projectId,
       timestamp: Date.now()
     });
     
@@ -291,7 +289,7 @@
       const response = await safeFetch(apiUrls.sessionReplay, {
         method: 'POST',
         body: JSON.stringify({
-          projectId: projectId,
+          tracking_id: trackingId,
           sessionId: getSessionId(),
           events: events,
           metadata: {
@@ -446,7 +444,7 @@
       // Use sendBeacon for reliable delivery
       try {
         navigator.sendBeacon(apiUrls.sessionReplay, JSON.stringify({
-          projectId: projectId,
+          tracking_id: trackingId,
           sessionId: getSessionId(),
           events: sessionReplayBuffer,
           metadata: { final: true }
