@@ -177,35 +177,35 @@
       if (typeof window.rrweb === 'undefined') {
         log('Loading rrweb...');
         
-        // Try CDN first (more reliable for external websites)
+        // Try your CDN first (most reliable)
         const script = document.createElement('script');
-        script.src = 'https://unpkg.com/rrweb@2.0.0-beta.12/dist/rrweb.min.js';
+        script.src = 'https://cdn.jsdelivr.net/gh/ecyb/daynight_tracking@main/rrweb.min.js';
         script.onload = function() {
-          log('rrweb loaded from unpkg CDN');
+          log('rrweb loaded from GitHub CDN');
           initializeRRWeb();
         };
         script.onerror = function() {
-          warn('Failed to load rrweb from unpkg, trying jsdelivr...');
-          // Try second CDN
+          warn('Failed to load rrweb from GitHub CDN, trying unpkg...');
+          // Try unpkg as fallback
           const fallbackScript = document.createElement('script');
-          fallbackScript.src = 'https://cdn.jsdelivr.net/npm/rrweb@2.0.0-beta.12/dist/rrweb.min.js';
+          fallbackScript.src = 'https://unpkg.com/rrweb@latest/dist/rrweb.min.js';
           fallbackScript.onload = function() {
-            log('rrweb loaded from jsdelivr CDN');
+            log('rrweb loaded from unpkg CDN');
             initializeRRWeb();
           };
           fallbackScript.onerror = function() {
-            warn('Failed to load rrweb from jsdelivr, trying local file...');
-            // Try local file as last resort
-            const localScript = document.createElement('script');
-            localScript.src = '/rrweb.min.js';
-            localScript.onload = function() {
-              log('rrweb loaded from local file');
+            warn('Failed to load rrweb from unpkg, trying jsdelivr...');
+            // Try jsdelivr as second fallback
+            const jsdelivrFallback = document.createElement('script');
+            jsdelivrFallback.src = 'https://cdn.jsdelivr.net/npm/rrweb@latest/dist/rrweb.min.js';
+            jsdelivrFallback.onload = function() {
+              log('rrweb loaded from jsdelivr CDN');
               initializeRRWeb();
             };
-            localScript.onerror = function() {
-              warn('Failed to load rrweb from all sources - session recording disabled');
+            jsdelivrFallback.onerror = function() {
+              warn('Failed to load rrweb from all CDNs - session recording disabled');
             };
-            document.head.appendChild(localScript);
+            document.head.appendChild(jsdelivrFallback);
           };
           document.head.appendChild(fallbackScript);
         };
