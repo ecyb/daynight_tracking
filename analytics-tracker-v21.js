@@ -176,31 +176,46 @@
       // Load rrweb if not already loaded
       if (typeof window.rrweb === 'undefined') {
         log('Loading rrweb...');
+        
+        // Try CDN first (more reliable for external websites)
         const script = document.createElement('script');
-        script.src = '/rrweb.min.js';
+        script.src = 'https://unpkg.com/rrweb@2.0.0-beta.12/dist/rrweb.min.js';
         script.onload = function() {
+          log('rrweb loaded from unpkg CDN');
           initializeRRWeb();
         };
         script.onerror = function() {
           warn('Failed to load rrweb from unpkg, trying jsdelivr...');
-          // Try fallback CDN
+          // Try second CDN
           const fallbackScript = document.createElement('script');
-          fallbackScript.src = '/rrweb.min.js';
+          fallbackScript.src = 'https://cdn.jsdelivr.net/npm/rrweb@2.0.0-beta.12/dist/rrweb.min.js';
           fallbackScript.onload = function() {
+            log('rrweb loaded from jsdelivr CDN');
             initializeRRWeb();
           };
           fallbackScript.onerror = function() {
-            warn('Failed to load rrweb from all CDNs - session recording disabled');
+            warn('Failed to load rrweb from jsdelivr, trying local file...');
+            // Try local file as last resort
+            const localScript = document.createElement('script');
+            localScript.src = '/rrweb.min.js';
+            localScript.onload = function() {
+              log('rrweb loaded from local file');
+              initializeRRWeb();
+            };
+            localScript.onerror = function() {
+              warn('Failed to load rrweb from all sources - session recording disabled');
+            };
+            document.head.appendChild(localScript);
           };
           document.head.appendChild(fallbackScript);
         };
         
-        // Timeout fallback after 5 seconds
+        // Timeout fallback after 8 seconds
         setTimeout(function() {
           if (typeof window.rrweb === 'undefined') {
             warn('rrweb loading timeout - session recording disabled');
           }
-        }, 5000);
+        }, 8000);
         
         document.head.appendChild(script);
       } else {
@@ -214,6 +229,12 @@
   function initializeRRWeb() {
     try {
       log('Initializing rrweb recorder...');
+      
+      // Check if rrweb is properly loaded
+      if (typeof window.rrweb === 'undefined' || !window.rrweb.record) {
+        warn('rrweb not properly loaded, cannot initialize recorder');
+        return;
+      }
       
       // Element.matches polyfill already added at script start
       
