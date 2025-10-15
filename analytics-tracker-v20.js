@@ -23,22 +23,58 @@
 (function() {
   'use strict';
   
+  // Add comprehensive polyfills BEFORE any rrweb code
+  if (!Element.prototype.matches) {
+    Element.prototype.matches = Element.prototype.matchesSelector || 
+      Element.prototype.mozMatchesSelector || 
+      Element.prototype.msMatchesSelector || 
+      Element.prototype.oMatchesSelector || 
+      Element.prototype.webkitMatchesSelector || 
+      function(s) {
+        var matches = (this.document || this.ownerDocument).querySelectorAll(s),
+            i = matches.length;
+        while (--i >= 0 && matches.item(i) !== this) {}
+        return i > -1;            
+      };
+  }
+  
+  // Force polyfill on all existing elements
+  var allElements = document.querySelectorAll('*');
+  for (var i = 0; i < allElements.length; i++) {
+    if (!allElements[i].matches) {
+      allElements[i].matches = Element.prototype.matches;
+    }
+  }
+  
+  // Add matches to NodeList prototype for better compatibility
+  if (NodeList.prototype && !NodeList.prototype.forEach) {
+    NodeList.prototype.forEach = Array.prototype.forEach;
+  }
+  
+  // Ensure all elements have matches method
+  var originalCreateElement = document.createElement;
+  document.createElement = function(tagName) {
+    var element = originalCreateElement.call(this, tagName);
+    if (!element.matches) {
+      element.matches = Element.prototype.matches;
+    }
+    return element;
+  };
+  
   // Configuration
   var config = {
     apiBaseUrl: 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1',
     sessionRecordingEnabled: true,
-    domCaptureEnabled: true,
-    captureInterval: 3000, // Capture DOM every 3 seconds
-    maxDomSize: 200000, // Max DOM size in characters (200KB)
+    // DOM capture removed - using rrweb only
     compressionEnabled: true,
     performanceTracking: true,
     errorTracking: true,
     debugMode: true
   };
 
-  // Get tracking configuration
-  var trackingId = window.__TRACKING_ID__ || 'your_tracking_id_here';
-  var projectId = window.__PROJECT_ID__ || 'your_project_id_here';
+  // Get tracking configuration - will be set in initialize()
+  var trackingId = 'your_tracking_id_here';
+  var projectId = 'your_project_id_here';
   
   // API endpoints
   var apiUrls = {
@@ -51,8 +87,7 @@
   // Session management
   var sessionId = null;
   var sessionReplayBuffer = [];
-  var domCaptureInterval = null;
-  var lastDomSnapshot = null;
+  // DOM capture variables removed - using rrweb only
   var performanceData = {};
   var errorCount = 0;
 
@@ -132,89 +167,144 @@
     });
   }
 
-  // DOM capture functions
-  function captureDOMSnapshot() {
+  // rrweb recording setup
+  let rrwebRecorder = null;
+  let rrwebEvents = [];
+  
+  function startRRWebRecording() {
     try {
-      // Get the full HTML content
-      var html = document.documentElement.outerHTML;
-      
-      log('Capturing DOM snapshot - size:', html.length + ' chars');
-      
-      // Check size limit
-      if (html.length > config.maxDomSize) {
-        warn('DOM too large, truncating...', html.length + ' chars');
-        html = html.substring(0, config.maxDomSize) + '... [TRUNCATED]';
+      // Load rrweb if not already loaded
+      if (typeof window.rrweb === 'undefined') {
+        log('Loading rrweb...');
+        const script = document.createElement('script');
+        script.src = '/rrweb.min.js';
+        script.onload = function() {
+          initializeRRWeb();
+        };
+        script.onerror = function() {
+          warn('Failed to load rrweb from unpkg, trying jsdelivr...');
+          // Try fallback CDN
+          const fallbackScript = document.createElement('script');
+          fallbackScript.src = '/rrweb.min.js';
+          fallbackScript.onload = function() {
+            initializeRRWeb();
+          };
+          fallbackScript.onerror = function() {
+            warn('Failed to load rrweb from all CDNs - session recording disabled');
+          };
+          document.head.appendChild(fallbackScript);
+        };
+        
+        // Timeout fallback after 5 seconds
+        setTimeout(function() {
+          if (typeof window.rrweb === 'undefined') {
+            warn('rrweb loading timeout - session recording disabled');
+          }
+        }, 5000);
+        
+        document.head.appendChild(script);
+      } else {
+        initializeRRWeb();
       }
-      
-      // Compress if enabled
-      if (config.compressionEnabled) {
-        // Simple compression - remove extra whitespace
-        html = html.replace(/\s+/g, ' ').trim();
-      }
-      
-      var snapshot = {
-        html: html,
-        timestamp: Date.now(),
-        url: window.location.href,
-        title: document.title,
-        viewport: {
-          width: window.innerWidth,
-          height: window.innerHeight
-        },
-        scroll: {
-          x: window.scrollX,
-          y: window.scrollY
-        },
-        performance: performanceData,
-        errorCount: errorCount
-      };
-      
-      log('DOM snapshot captured successfully');
-      return snapshot;
     } catch (error) {
-      warn('Failed to capture DOM snapshot:', error);
-      return null;
+      warn('Failed to start rrweb recording:', error);
     }
   }
+  
+  function initializeRRWeb() {
+    try {
+      log('Initializing rrweb recorder...');
+      
+      // Element.matches polyfill already added at script start
+      
+      let typeCounts = { meta:0, full:0, inc:0, cust:0, other:0 };
+      
+      rrwebRecorder = window.rrweb.record({
+        emit(event) {
+          try {
+            // sanity: count types
+            switch (event.type) {
+              case 4: typeCounts.meta++; break;             // Meta
+              case 2: typeCounts.full++; break;             // FullSnapshot
+              case 3: typeCounts.inc++; break;              // Incremental
+              case 5: typeCounts.cust++; break;             // Custom
+              default: typeCounts.other++; break;
+            }
 
-  function startDOMCapture() {
-    if (!config.domCaptureEnabled) return;
-    
-    log('Starting DOM capture...');
-    
-    // Capture initial snapshot
-    var initialSnapshot = captureDOMSnapshot();
-    if (initialSnapshot) {
-      addToReplayBuffer({
-        type: 'dom_snapshot',
-        data: initialSnapshot,
-        timestamp: Date.now()
+            // Add to buffer for session replay
+            rrwebEvents.push(event);
+            addToReplayBuffer({
+              type: 'rrweb_event',
+              data: event,
+              timestamp: Date.now()
+            });
+            
+            // useful breadcrumbs
+            if (event.type === 4) log('rrweb: Meta event captured');
+            if (event.type === 2) log('rrweb: Full snapshot captured');
+            if (event.type === 3) log('rrweb: Incremental snapshot captured');
+          } catch (error) {
+            // Silently handle rrweb emit errors to prevent breaking the recording
+            console.warn('rrweb emit error (handled):', error.message);
+          }
+        },
+        // Record canvas replays, inline stylesheets/fonts to reduce external deps in replay
+        recordCanvas: true,
+        inlineStylesheet: true,
+        // Sampling to keep payload sane without killing fidelity
+        sampling: {
+          mousemove: 50,          // throttle mousemove to every 50ms
+          scroll: 100,            // throttle scroll
+          media: true,            // track <audio>/<video>
+          input: 'last',          // record the last input in a burst
+        },
+        // Privacy: mask sensitive stuff; tune to your app
+        maskAllInputs: false,
+        maskTextSelector: '[data-mask], [type="password"]',
+        // blockSelector: '[data-replay-block]', // TEMPORARILY DISABLED - elements you NEVER want to record
+        // Periodic full snapshots help recovery
+        checkoutEveryNms: 2 * 60 * 1000, // 2 min
+        checkoutEveryNth: 0,
+        // Additional options for better fidelity
+        collectFonts: true,
       });
-      lastDomSnapshot = initialSnapshot;
-    }
-    
-    // Set up periodic capture
-    domCaptureInterval = setInterval(function() {
-      var snapshot = captureDOMSnapshot();
-      if (snapshot && snapshot.html !== lastDomSnapshot?.html) {
-        addToReplayBuffer({
-          type: 'dom_snapshot',
-          data: snapshot,
-          timestamp: Date.now()
-        });
-        lastDomSnapshot = snapshot;
-        log('DOM snapshot captured');
+      
+      // FORCE a full snapshot right after starting (some CSPs/timing shenanigans block the initial one)
+      if (window.rrweb?.record?.takeFullSnapshot) {
+        window.rrweb.record.takeFullSnapshot(true);
+        log('rrweb: takeFullSnapshot() called explicitly');
       }
-    }, config.captureInterval);
+      
+      // After a tick, verify we have a baseline
+      setTimeout(() => {
+        log('rrweb type counts:', JSON.stringify(typeCounts));
+        if (typeCounts.full === 0) {
+          warn('❌ No FullSnapshot recorded. Replays will be blank.');
+          warn('Check: server not dropping large events? blockSelector not nuking root? CSP errors in console?');
+        }
+      }, 1000);
+      
+      log('✅ rrweb recording started');
+    } catch (error) {
+      warn('Failed to initialize rrweb:', error);
+    }
+  }
+  
+  function stopRRWebRecording() {
+    if (rrwebRecorder) {
+      try {
+        rrwebRecorder();
+        rrwebRecorder = null;
+        log('rrweb recording stopped');
+      } catch (error) {
+        warn('Failed to stop rrweb recording:', error);
+      }
+    }
   }
 
-  function stopDOMCapture() {
-    if (domCaptureInterval) {
-      clearInterval(domCaptureInterval);
-      domCaptureInterval = null;
-      log('DOM capture stopped');
-    }
-  }
+  // DOM capture removed - using rrweb only
+
+  // DOM capture functions removed - using rrweb only
 
   // Enhanced event capture
   function addToReplayBuffer(event) {
@@ -458,17 +548,7 @@
       // Track new page view after navigation
       trackPageView();
       
-      // Capture DOM after navigation
-      setTimeout(function() {
-        var snapshot = captureDOMSnapshot();
-        if (snapshot) {
-          addToReplayBuffer({
-            type: 'dom_snapshot',
-            data: snapshot,
-            timestamp: Date.now()
-          });
-        }
-      }, 500);
+      // DOM capture removed - rrweb handles navigation automatically
     };
 
     // Track replaceState
@@ -479,16 +559,7 @@
       
       trackPageView();
       
-      setTimeout(function() {
-        var snapshot = captureDOMSnapshot();
-        if (snapshot) {
-          addToReplayBuffer({
-            type: 'dom_snapshot',
-            data: snapshot,
-            timestamp: Date.now()
-          });
-        }
-      }, 500);
+      // DOM capture removed - rrweb handles navigation automatically
     };
 
     // Track popstate
@@ -496,16 +567,7 @@
       log('SPA Navigation detected (popstate):', window.location.pathname);
       trackPageView();
       
-      setTimeout(function() {
-        var snapshot = captureDOMSnapshot();
-        if (snapshot) {
-          addToReplayBuffer({
-            type: 'dom_snapshot',
-            data: snapshot,
-            timestamp: Date.now()
-          });
-        }
-      }, 500);
+      // DOM capture removed - rrweb handles navigation automatically
     });
   }
 
@@ -547,8 +609,8 @@
     // Setup error tracking
     setupErrorTracking();
     
-    // Start DOM capture
-    startDOMCapture();
+    // Start rrweb recording instead of DOM capture
+    startRRWebRecording();
     
     // Setup event listeners
     setupEventListeners();
@@ -557,12 +619,12 @@
     // Track initial pageview
     trackPageView();
     
-    log('Session recording started with DOM capture');
+    log('Session recording started with rrweb');
   }
 
   // Send final events on page unload
   window.addEventListener('beforeunload', function() {
-    stopDOMCapture();
+    stopRRWebRecording();
     sendSessionReplayEvents();
   });
 
@@ -579,6 +641,10 @@
 
   // Initialize
   function initialize() {
+    // Get tracking configuration now that the page is loaded
+    trackingId = window.analyticsConfig?.trackingId || window.__TRACKING_ID__ || 'your_tracking_id_here';
+    projectId = window.analyticsConfig?.projectId || window.__PROJECT_ID__ || 'your_project_id_here';
+    
     log('Insight Stream Analytics Tracker v3.0.0 loaded');
     log('Tracking ID:', trackingId);
     log('Project ID:', projectId);
