@@ -152,6 +152,9 @@
   }
 
   function detectDeadClick(element) {
+    // Skip if element is null (e.g., mousemove events)
+    if (!element) return false;
+    
     // Check if click was on non-interactive element or empty space
     var isInteractive = element.tagName === 'A' || 
                        element.tagName === 'BUTTON' || 
@@ -216,7 +219,7 @@
     switch (eventType) {
       case 'click':
         if (detectRageClick(currentTime)) frustrationSignals++;
-        if (detectDeadClick(element)) frustrationSignals++;
+        if (element && detectDeadClick(element)) frustrationSignals++;
         totalSignals += 2;
         lastClickTime = currentTime;
         break;
@@ -238,9 +241,7 @@
         break;
 
       case 'mousemove':
-      case 'click': // Treat mousemove as click for emotion detection
-        if (detectIdleSpike(currentTime)) frustrationSignals++;
-        totalSignals += 1;
+        // Skip mousemove events for emotion detection (they're now sent as click)
         break;
     }
 
