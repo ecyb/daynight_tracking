@@ -135,6 +135,12 @@
     console.error('❌ [Analytics]', message, data || '');
   }
 
+  function debug(message, data) {
+    if (config.debugMode) {
+      console.log('🔍 [Debug]', message, data || '');
+    }
+  }
+
   // Emotion detection functions
   function calculateScrollDepth() {
     var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
@@ -212,39 +218,72 @@
     emotionState.lastInteractionTime = currentTime;
     emotionState.interactionCount++;
 
+    debug('Emotion state update started', {
+      eventType: eventType,
+      element: element ? element.tagName : 'null',
+      interactionCount: emotionState.interactionCount,
+      currentState: emotionState.currentState,
+      frustrationScore: emotionState.frustrationScore
+    });
+
     var frustrationSignals = 0;
     var totalSignals = 0;
 
     // Detect frustration signals based on event type
     switch (eventType) {
       case 'click':
-        if (detectRageClick(currentTime)) frustrationSignals++;
-        if (element && detectDeadClick(element)) frustrationSignals++;
+        var rageClick = detectRageClick(currentTime);
+        var deadClick = element && detectDeadClick(element);
+        if (rageClick) frustrationSignals++;
+        if (deadClick) frustrationSignals++;
         totalSignals += 2;
         lastClickTime = currentTime;
+        debug('Click analysis', { rageClick, deadClick, frustrationSignals, totalSignals });
         break;
 
       case 'scroll':
         currentScrollDepth = calculateScrollDepth();
         maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth);
-        if (detectScrollStall(currentTime)) frustrationSignals++;
-        if (detectBacktrack()) frustrationSignals++;
+        var scrollStall = detectScrollStall(currentTime);
+        var backtrack = detectBacktrack();
+        if (scrollStall) frustrationSignals++;
+        if (backtrack) frustrationSignals++;
         totalSignals += 2;
         lastScrollTime = currentTime;
+        debug('Scroll analysis', { 
+          scrollDepth: currentScrollDepth, 
+          maxScrollDepth, 
+          scrollStall, 
+          backtrack, 
+          frustrationSignals, 
+          totalSignals 
+        });
         break;
 
+        
       case 'input':
         // Skip input events for emotion detection (they're now sent as click)
+        debug('Input event skipped for emotion detection');
         break;
 
       case 'mousemove':
         // Skip mousemove events for emotion detection (they're now sent as click)
+        debug('Mousemove event skipped for emotion detection');
         break;
     }
 
     // Calculate frustration score (0-100)
     var frustrationRatio = totalSignals > 0 ? frustrationSignals / totalSignals : 0;
+    var oldFrustrationScore = emotionState.frustrationScore;
     emotionState.frustrationScore = Math.min(100, emotionState.frustrationScore + (frustrationRatio * 10));
+
+    debug('Frustration calculation', {
+      frustrationRatio: frustrationRatio,
+      oldScore: oldFrustrationScore,
+      newScore: emotionState.frustrationScore,
+      frustrationSignals: frustrationSignals,
+      totalSignals: totalSignals
+    });
 
     // Determine emotional state
     var previousState = emotionState.currentState;
@@ -262,6 +301,14 @@
       emotionState.intensity = 50;
     }
 
+    debug('Emotion state determination', {
+      previousState: previousState,
+      newState: emotionState.currentState,
+      intensity: emotionState.intensity,
+      frustrationScore: emotionState.frustrationScore,
+      interactionCount: emotionState.interactionCount
+    });
+
     // Record state change
     if (previousState !== emotionState.currentState) {
       emotionState.stateHistory.push({
@@ -270,6 +317,11 @@
         toState: emotionState.currentState,
         intensity: emotionState.intensity,
         frustrationScore: emotionState.frustrationScore
+      });
+      debug('Emotion state changed', {
+        from: previousState,
+        to: emotionState.currentState,
+        stateHistoryLength: emotionState.stateHistory.length
       });
     }
 
@@ -304,8 +356,21 @@
 
     behavioralEvents.push(behavioralEvent);
     
+    debug('Behavioral event created', {
+      eventType: behavioralEvent.event_type,
+      state: behavioralEvent.state,
+      intensity: behavioralEvent.intensity,
+      frustrationScore: behavioralEvent.frustration_score,
+      bufferLength: behavioralEvents.length
+    });
+    
     // Send behavioral event if buffer is full or significant state change
     if (behavioralEvents.length >= 10 || previousState !== emotionState.currentState) {
+      debug('Triggering behavioral events send', {
+        reason: behavioralEvents.length >= 10 ? 'buffer_full' : 'state_change',
+        bufferLength: behavioralEvents.length,
+        stateChanged: previousState !== emotionState.currentState
+      });
       sendBehavioralEvents();
     }
 
@@ -316,39 +381,66 @@
     });
   }
 
-  function sendBehavioralEvents() {
+  function sendBehavioralEvents(retryCount = 0) {
     if (behavioralEvents.length === 0) return;
 
     var eventsToSend = behavioralEvents.splice(0, behavioralEvents.length);
+    var maxRetries = 3;
+    
+    debug('Sending behavioral events', {
+      count: eventsToSend.length,
+      retryCount: retryCount,
+      maxRetries: maxRetries,
+      sessionId: sessionId,
+      projectId: projectId,
+      trackingId: trackingId,
+      currentState: emotionState.currentState,
+      frustrationScore: emotionState.frustrationScore
+    });
+    
+    var requestBody = {
+      tracking_id: trackingId,
+      project_id: projectId,
+      session_id: sessionId,
+      events: eventsToSend,
+      emotion_state: {
+        currentState: emotionState.currentState,
+        intensity: emotionState.intensity,
+        frustrationScore: emotionState.frustrationScore,
+        stateHistory: emotionState.stateHistory.slice(-10) // Last 10 state changes
+      }
+    };
+    
+    debug('Request body prepared', {
+      bodySize: JSON.stringify(requestBody).length,
+      eventTypes: eventsToSend.map(e => e.event_type),
+      emotionStateHistoryLength: emotionState.stateHistory.length
+    });
     
     fetch(apiUrls.behavior, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        tracking_id: trackingId,
-        project_id: projectId,
-        session_id: sessionId,
-        events: eventsToSend,
-        emotion_state: {
-          currentState: emotionState.currentState,
-          intensity: emotionState.intensity,
-          frustrationScore: emotionState.frustrationScore,
-          stateHistory: emotionState.stateHistory.slice(-10) // Last 10 state changes
-        }
-      })
+      body: JSON.stringify(requestBody)
     })
     .then(response => {
       if (!response.ok) {
-        throw new Error('Failed to send behavioral events');
+        throw new Error('Failed to send behavioral events - ' + response.status);
       }
       log('Behavioral events sent', { count: eventsToSend.length });
     })
     .catch(err => {
-      error('Failed to send behavioral events', err);
-      // Re-add events to buffer for retry
-      behavioralEvents.unshift(...eventsToSend);
+      if (retryCount < maxRetries) {
+        // Retry with exponential backoff
+        setTimeout(() => {
+          behavioralEvents.unshift(...eventsToSend);
+          sendBehavioralEvents(retryCount + 1);
+        }, Math.pow(2, retryCount) * 1000); // 1s, 2s, 4s
+      } else {
+        error('Failed to send behavioral events after ' + maxRetries + ' retries', err);
+        // Don't re-add events to buffer after max retries to prevent infinite loops
+      }
     });
   }
 
@@ -419,6 +511,11 @@
   
   function startRRWebRecording() {
     try {
+      debug('Starting rrweb recording', {
+        rrwebAlreadyLoaded: typeof window.rrweb !== 'undefined',
+        sessionRecordingEnabled: config.sessionRecordingEnabled
+      });
+      
       // Load rrweb if not already loaded
       if (typeof window.rrweb === 'undefined') {
         log('Loading rrweb...');
@@ -428,28 +525,34 @@
         script.src = 'https://cdn.jsdelivr.net/gh/ecyb/daynight_tracking@main/rrweb.min.js';
         script.onload = function() {
           log('rrweb loaded from GitHub CDN');
+          debug('rrweb script loaded successfully from GitHub CDN');
           initializeRRWeb();
         };
         script.onerror = function() {
           warn('Failed to load rrweb from GitHub CDN, trying unpkg...');
+          debug('GitHub CDN failed, trying unpkg fallback');
           // Try unpkg as fallback
           const fallbackScript = document.createElement('script');
           fallbackScript.src = 'https://unpkg.com/rrweb@latest/dist/rrweb.min.js';
           fallbackScript.onload = function() {
             log('rrweb loaded from unpkg CDN');
+            debug('rrweb script loaded successfully from unpkg CDN');
             initializeRRWeb();
           };
           fallbackScript.onerror = function() {
             warn('Failed to load rrweb from unpkg, trying jsdelivr...');
+            debug('unpkg CDN failed, trying jsdelivr fallback');
             // Try jsdelivr as second fallback
             const jsdelivrFallback = document.createElement('script');
             jsdelivrFallback.src = 'https://cdn.jsdelivr.net/npm/rrweb@latest/dist/rrweb.min.js';
             jsdelivrFallback.onload = function() {
               log('rrweb loaded from jsdelivr CDN');
+              debug('rrweb script loaded successfully from jsdelivr CDN');
               initializeRRWeb();
             };
             jsdelivrFallback.onerror = function() {
               warn('Failed to load rrweb from all CDNs - session recording disabled');
+              debug('All CDN attempts failed - session recording disabled');
             };
             document.head.appendChild(jsdelivrFallback);
           };
@@ -460,15 +563,18 @@
         setTimeout(function() {
           if (typeof window.rrweb === 'undefined') {
             warn('rrweb loading timeout - session recording disabled');
+            debug('rrweb loading timeout after 8 seconds');
           }
         }, 8000);
         
         document.head.appendChild(script);
       } else {
+        debug('rrweb already loaded, initializing directly');
         initializeRRWeb();
       }
     } catch (error) {
       warn('Failed to start rrweb recording:', error);
+      debug('Exception in startRRWebRecording:', error);
     }
   }
   
@@ -580,8 +686,8 @@
     sessionReplayBuffer.push({
       type: event.type,
       data: event.data,
-      timestamp: event.timestamp || Date.now(),
-      url: window.location.href
+      timestamp: event.timestamp || Date.now()
+      // Removed url field - backend doesn't expect it
     });
     
     // Send buffer when it gets large
@@ -591,10 +697,19 @@
   }
 
   // Enhanced session replay sending
-  function sendSessionReplayEvents() {
+  function sendSessionReplayEvents(retryCount = 0) {
     if (sessionReplayBuffer.length === 0) return;
     
     var eventsToSend = sessionReplayBuffer.splice(0, 10);
+    var maxRetries = 2; // Fewer retries for session replay to avoid blocking
+    
+    // Log what we're sending for debugging
+    log('Sending session replay events:', {
+      count: eventsToSend.length,
+      types: eventsToSend.map(e => e.type),
+      sessionId: sessionId,
+      trackingId: trackingId
+    });
     
     fetch(apiUrls.sessionReplay, {
       method: 'POST',
@@ -617,12 +732,34 @@
         }
       })
     })
-    .then(response => response.json())
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Session replay failed - ' + response.status + ' ' + response.statusText);
+      }
+      return response.json();
+    })
     .then(data => {
-      log('Session replay events sent:', eventsToSend.length);
+      log('Session replay events sent successfully:', {
+        count: eventsToSend.length,
+        response: data
+      });
     })
     .catch(error => {
-      warn('Session replay send failed:', error);
+      if (retryCount < maxRetries) {
+        warn('Session replay failed, retrying...', {
+          attempt: retryCount + 1,
+          maxRetries: maxRetries,
+          error: error.message
+        });
+        // Retry with shorter delay for session replay
+        setTimeout(() => {
+          sessionReplayBuffer.unshift(...eventsToSend);
+          sendSessionReplayEvents(retryCount + 1);
+        }, 500 * (retryCount + 1)); // 500ms, 1s
+      } else {
+        error('Session replay send failed after ' + maxRetries + ' retries:', error);
+        // Don't re-add events to buffer after max retries
+      }
     });
   }
 
@@ -904,6 +1041,12 @@
           }
         })
       })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Final emotion state failed - ' + response.status);
+        }
+        log('Final emotion state sent successfully');
+      })
       .catch(err => {
         error('Failed to send final emotion state', err);
       });
@@ -942,23 +1085,44 @@
     sessionId = 'sess_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
     log('New session created:', sessionId);
     
+    debug('Session initialization started', {
+      sessionId: sessionId,
+      trackingId: trackingId,
+      projectId: projectId,
+      timestamp: Date.now()
+    });
+    
     // Capture performance data
+    debug('Capturing performance data');
     capturePerformanceData();
     
     // Setup error tracking
+    debug('Setting up error tracking');
     setupErrorTracking();
     
     // Start rrweb recording instead of DOM capture
+    debug('Starting rrweb recording');
     startRRWebRecording();
     
     // Setup event listeners
+    debug('Setting up event listeners');
     setupEventListeners();
+    
+    debug('Setting up SPA navigation tracking');
     setupSPANavigation();
     
     // Track initial pageview
+    debug('Tracking initial pageview');
     trackPageView();
     
     log('Session recording started with rrweb');
+    debug('Session initialization completed', {
+      sessionId: sessionId,
+      performanceDataCaptured: !!performanceData,
+      errorTrackingSetup: true,
+      rrwebStarted: true,
+      eventListenersSetup: true
+    });
   }
 
   // Send final events on page unload
@@ -981,19 +1145,37 @@
 
   // Initialize
   function initialize() {
+    debug('Analytics tracker initialization started', {
+      documentReadyState: document.readyState,
+      windowAnalyticsConfig: !!window.analyticsConfig,
+      windowTrackingId: !!window.__TRACKING_ID__,
+      windowProjectId: !!window.__PROJECT_ID__
+    });
+    
     // Get tracking configuration now that the page is loaded
     trackingId = window.analyticsConfig?.trackingId || window.__TRACKING_ID__ || 'your_tracking_id_here';
     projectId = window.analyticsConfig?.projectId || window.__PROJECT_ID__ || 'your_project_id_here';
+    
+    debug('Configuration loaded', {
+      trackingId: trackingId,
+      projectId: projectId,
+      sessionRecordingEnabled: config.sessionRecordingEnabled,
+      debugMode: config.debugMode
+    });
     
     log('Insight Stream Analytics Tracker v3.0.0 loaded');
     log('Tracking ID:', trackingId);
     log('Project ID:', projectId);
     
     if (config.sessionRecordingEnabled) {
+      debug('Session recording enabled, initializing session');
       initializeSession();
+    } else {
+      debug('Session recording disabled, skipping session initialization');
     }
     
     log('Analytics tracking initialized');
+    debug('Analytics tracker initialization completed');
   }
 
   // Start when DOM is ready
