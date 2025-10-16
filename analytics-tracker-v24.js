@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.0.1
- * Last Updated: 2025-10-16
+ * Version: 4.0.0
+ * Last Updated: 2025-10-15
  * 
  * Features:
  * - Real-time pageview tracking
@@ -291,7 +291,7 @@
       } : null,
       page_path: window.location.pathname,
       session_id: sessionId,
-      project_id: config.projectId,
+      project_id: projectId,
       metadata: {
         rapidClicks: emotionState.rapidClicks,
         deadClicks: emotionState.deadClicks,
@@ -329,7 +329,7 @@
       },
       body: JSON.stringify({
         tracking_id: trackingId,
-        project_id: config.projectId,
+        project_id: projectId,
         session_id: sessionId,
         events: eventsToSend,
         emotion_state: {
@@ -886,7 +886,7 @@
         },
         body: JSON.stringify({
           tracking_id: trackingId,
-          project_id: config.projectId,
+          project_id: projectId,
           session_id: sessionId,
           final_emotion_state: {
             currentState: emotionState.currentState,
