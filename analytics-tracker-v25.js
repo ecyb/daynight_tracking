@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 4.0.0
+ * Version: 3.0.0
  * Last Updated: 2025-10-15
  * 
  * Features:
@@ -238,6 +238,7 @@
         break;
 
       case 'mousemove':
+      case 'click': // Treat mousemove as click for emotion detection
         if (detectIdleSpike(currentTime)) frustrationSignals++;
         totalSignals += 1;
         break;
@@ -720,7 +721,7 @@
       clearTimeout(mouseMoveTimeout);
       mouseMoveTimeout = setTimeout(function() {
         // Update emotion state (throttled)
-        updateEmotionState('mousemove', null, {
+        updateEmotionState('click', null, {
           x: e.clientX,
           y: e.clientY
         });
