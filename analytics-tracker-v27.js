@@ -234,10 +234,7 @@
         break;
 
       case 'input':
-        formFieldChanges++;
-        if (detectFormChurn()) frustrationSignals++;
-        totalSignals += 1;
-        lastInputTime = currentTime;
+        // Skip input events for emotion detection (they're now sent as click)
         break;
 
       case 'mousemove':
@@ -764,8 +761,8 @@
     document.addEventListener('input', function(e) {
       if (e.target.type === 'password') return; // Don't capture passwords
       
-      // Update emotion state
-      updateEmotionState('input', e.target, {
+      // Update emotion state - send as click since input is not allowed by database
+      updateEmotionState('click', e.target, {
         value: e.target.value,
         type: e.target.type,
         name: e.target.name || '',
