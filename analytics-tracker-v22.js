@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.0.0
- * Last Updated: 2025-10-15
+ * Version: 3.0.1
+ * Last Updated: 2025-10-16
  * 
  * Features:
  * - Real-time pageview tracking
@@ -91,6 +91,35 @@
   var performanceData = {};
   var errorCount = 0;
 
+  // Emotion tracking system
+  var emotionState = {
+    currentState: 'neutral', // neutral, hesitation, frustration, recovery, conversion, bounce
+    intensity: 0, // 0-100 scale
+    frustrationScore: 0,
+    lastInteractionTime: Date.now(),
+    interactionCount: 0,
+    rapidClicks: 0,
+    deadClicks: 0,
+    scrollStalls: 0,
+    formChurns: 0,
+    idleSpikes: 0,
+    backtrackEvents: 0,
+    rageClickThreshold: 3, // clicks within 1 second
+    deadClickThreshold: 2000, // 2 seconds without response
+    scrollStallThreshold: 3000, // 3 seconds without scroll
+    idleThreshold: 10000, // 10 seconds of inactivity
+    stateHistory: []
+  };
+
+  var behavioralEvents = [];
+  var lastClickTime = 0;
+  var lastScrollTime = 0;
+  var lastInputTime = 0;
+  var currentScrollDepth = 0;
+  var maxScrollDepth = 0;
+  var formFieldChanges = 0;
+  var currentForm = null;
+
   // Utility functions
   function log(message, data) {
     if (config.debugMode) {
@@ -104,6 +133,224 @@
 
   function error(message, data) {
     console.error('❌ [Analytics]', message, data || '');
+  }
+
+  // Emotion detection functions
+  function calculateScrollDepth() {
+    var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    var documentHeight = document.documentElement.scrollHeight - window.innerHeight;
+    return documentHeight > 0 ? Math.round((scrollTop / documentHeight) * 100) : 0;
+  }
+
+  function detectRageClick(currentTime) {
+    var timeSinceLastClick = currentTime - lastClickTime;
+    if (timeSinceLastClick < 1000) { // Less than 1 second
+      emotionState.rapidClicks++;
+      return true;
+    }
+    return false;
+  }
+
+  function detectDeadClick(element) {
+    // Check if click was on non-interactive element or empty space
+    var isInteractive = element.tagName === 'A' || 
+                       element.tagName === 'BUTTON' || 
+                       element.tagName === 'INPUT' || 
+                       element.tagName === 'SELECT' ||
+                       element.onclick ||
+                       element.getAttribute('role') === 'button' ||
+                       element.classList.contains('clickable') ||
+                       element.classList.contains('btn');
+    
+    if (!isInteractive) {
+      emotionState.deadClicks++;
+      return true;
+    }
+    return false;
+  }
+
+  function detectScrollStall(currentTime) {
+    var timeSinceLastScroll = currentTime - lastScrollTime;
+    if (timeSinceLastScroll > emotionState.scrollStallThreshold) {
+      emotionState.scrollStalls++;
+      return true;
+    }
+    return false;
+  }
+
+  function detectFormChurn() {
+    if (formFieldChanges > 5) { // More than 5 field changes
+      emotionState.formChurns++;
+      return true;
+    }
+    return false;
+  }
+
+  function detectIdleSpike(currentTime) {
+    var timeSinceLastInteraction = currentTime - emotionState.lastInteractionTime;
+    if (timeSinceLastInteraction > emotionState.idleThreshold) {
+      emotionState.idleSpikes++;
+      return true;
+    }
+    return false;
+  }
+
+  function detectBacktrack() {
+    var currentDepth = calculateScrollDepth();
+    if (currentDepth < currentScrollDepth - 20) { // Scrolled back up significantly
+      emotionState.backtrackEvents++;
+      return true;
+    }
+    return false;
+  }
+
+  function updateEmotionState(eventType, element, eventData) {
+    var currentTime = Date.now();
+    emotionState.lastInteractionTime = currentTime;
+    emotionState.interactionCount++;
+
+    var frustrationSignals = 0;
+    var totalSignals = 0;
+
+    // Detect frustration signals based on event type
+    switch (eventType) {
+      case 'click':
+        if (detectRageClick(currentTime)) frustrationSignals++;
+        if (detectDeadClick(element)) frustrationSignals++;
+        totalSignals += 2;
+        lastClickTime = currentTime;
+        break;
+
+      case 'scroll':
+        currentScrollDepth = calculateScrollDepth();
+        maxScrollDepth = Math.max(maxScrollDepth, currentScrollDepth);
+        if (detectScrollStall(currentTime)) frustrationSignals++;
+        if (detectBacktrack()) frustrationSignals++;
+        totalSignals += 2;
+        lastScrollTime = currentTime;
+        break;
+
+      case 'input':
+        formFieldChanges++;
+        if (detectFormChurn()) frustrationSignals++;
+        totalSignals += 1;
+        lastInputTime = currentTime;
+        break;
+
+      case 'mousemove':
+        if (detectIdleSpike(currentTime)) frustrationSignals++;
+        totalSignals += 1;
+        break;
+    }
+
+    // Calculate frustration score (0-100)
+    var frustrationRatio = totalSignals > 0 ? frustrationSignals / totalSignals : 0;
+    emotionState.frustrationScore = Math.min(100, emotionState.frustrationScore + (frustrationRatio * 10));
+
+    // Determine emotional state
+    var previousState = emotionState.currentState;
+    if (emotionState.frustrationScore > 70) {
+      emotionState.currentState = 'frustration';
+      emotionState.intensity = Math.min(100, emotionState.frustrationScore);
+    } else if (emotionState.frustrationScore > 40) {
+      emotionState.currentState = 'hesitation';
+      emotionState.intensity = emotionState.frustrationScore;
+    } else if (emotionState.frustrationScore < 20 && emotionState.interactionCount > 5) {
+      emotionState.currentState = 'conversion';
+      emotionState.intensity = 100 - emotionState.frustrationScore;
+    } else {
+      emotionState.currentState = 'neutral';
+      emotionState.intensity = 50;
+    }
+
+    // Record state change
+    if (previousState !== emotionState.currentState) {
+      emotionState.stateHistory.push({
+        timestamp: currentTime,
+        fromState: previousState,
+        toState: emotionState.currentState,
+        intensity: emotionState.intensity,
+        frustrationScore: emotionState.frustrationScore
+      });
+    }
+
+    // Create behavioral event
+    var behavioralEvent = {
+      event_type: eventType,
+      timestamp: currentTime,
+      state: emotionState.currentState,
+      intensity: emotionState.intensity,
+      frustration_score: emotionState.frustrationScore,
+      scroll_depth: currentScrollDepth,
+      max_scroll_depth: maxScrollDepth,
+      element: element ? {
+        tagName: element.tagName,
+        className: element.className,
+        id: element.id,
+        text: element.textContent ? element.textContent.substring(0, 100) : ''
+      } : null,
+      page_path: window.location.pathname,
+      session_id: sessionId,
+      project_id: config.projectId,
+      metadata: {
+        rapidClicks: emotionState.rapidClicks,
+        deadClicks: emotionState.deadClicks,
+        scrollStalls: emotionState.scrollStalls,
+        formChurns: emotionState.formChurns,
+        idleSpikes: emotionState.idleSpikes,
+        backtrackEvents: emotionState.backtrackEvents,
+        interactionCount: emotionState.interactionCount
+      }
+    };
+
+    behavioralEvents.push(behavioralEvent);
+    
+    // Send behavioral event if buffer is full or significant state change
+    if (behavioralEvents.length >= 10 || previousState !== emotionState.currentState) {
+      sendBehavioralEvents();
+    }
+
+    log('Emotion state updated', {
+      state: emotionState.currentState,
+      intensity: emotionState.intensity,
+      frustrationScore: emotionState.frustrationScore
+    });
+  }
+
+  function sendBehavioralEvents() {
+    if (behavioralEvents.length === 0) return;
+
+    var eventsToSend = behavioralEvents.splice(0, behavioralEvents.length);
+    
+    fetch(apiUrls.behavior, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tracking_id: trackingId,
+        project_id: config.projectId,
+        session_id: sessionId,
+        events: eventsToSend,
+        emotion_state: {
+          currentState: emotionState.currentState,
+          intensity: emotionState.intensity,
+          frustrationScore: emotionState.frustrationScore,
+          stateHistory: emotionState.stateHistory.slice(-10) // Last 10 state changes
+        }
+      })
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Failed to send behavioral events');
+      }
+      log('Behavioral events sent', { count: eventsToSend.length });
+    })
+    .catch(err => {
+      error('Failed to send behavioral events', err);
+      // Re-add events to buffer for retry
+      behavioralEvents.unshift(...eventsToSend);
+    });
   }
 
   // Performance tracking
@@ -444,6 +691,16 @@
   function setupEventListeners() {
     // Mouse events
     document.addEventListener('click', function(e) {
+      // Update emotion state
+      updateEmotionState('click', e.target, {
+        x: e.clientX,
+        y: e.clientY,
+        target: e.target.tagName,
+        text: e.target.textContent?.substring(0, 50) || '',
+        href: e.target.href || '',
+        className: e.target.className || ''
+      });
+
       addToReplayBuffer({
         type: 'click',
         data: {
@@ -462,6 +719,12 @@
     document.addEventListener('mousemove', function(e) {
       clearTimeout(mouseMoveTimeout);
       mouseMoveTimeout = setTimeout(function() {
+        // Update emotion state (throttled)
+        updateEmotionState('mousemove', null, {
+          x: e.clientX,
+          y: e.clientY
+        });
+
         addToReplayBuffer({
           type: 'mousemove',
           data: {
@@ -477,6 +740,13 @@
     window.addEventListener('scroll', function() {
       clearTimeout(scrollTimeout);
       scrollTimeout = setTimeout(function() {
+        // Update emotion state (throttled)
+        updateEmotionState('scroll', null, {
+          x: window.scrollX,
+          y: window.scrollY,
+          maxScrollY: document.documentElement.scrollHeight - window.innerHeight
+        });
+
         addToReplayBuffer({
           type: 'scroll',
           data: {
@@ -491,6 +761,15 @@
     // Input events
     document.addEventListener('input', function(e) {
       if (e.target.type === 'password') return; // Don't capture passwords
+      
+      // Update emotion state
+      updateEmotionState('input', e.target, {
+        value: e.target.value,
+        type: e.target.type,
+        name: e.target.name || '',
+        placeholder: e.target.placeholder || '',
+        id: e.target.id || ''
+      });
       
       addToReplayBuffer({
         type: 'input',
@@ -592,6 +871,46 @@
     });
   }
 
+  // Send final emotion state on page unload
+  function sendFinalEmotionState() {
+    if (behavioralEvents.length > 0) {
+      sendBehavioralEvents();
+    }
+    
+    // Send final emotion state
+    if (emotionState.interactionCount > 0) {
+      fetch(apiUrls.behavior, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tracking_id: trackingId,
+          project_id: config.projectId,
+          session_id: sessionId,
+          final_emotion_state: {
+            currentState: emotionState.currentState,
+            intensity: emotionState.intensity,
+            frustrationScore: emotionState.frustrationScore,
+            totalInteractions: emotionState.interactionCount,
+            rapidClicks: emotionState.rapidClicks,
+            deadClicks: emotionState.deadClicks,
+            scrollStalls: emotionState.scrollStalls,
+            formChurns: emotionState.formChurns,
+            idleSpikes: emotionState.idleSpikes,
+            backtrackEvents: emotionState.backtrackEvents,
+            maxScrollDepth: maxScrollDepth,
+            sessionDuration: Date.now() - emotionState.lastInteractionTime,
+            stateHistory: emotionState.stateHistory
+          }
+        })
+      })
+      .catch(err => {
+        error('Failed to send final emotion state', err);
+      });
+    }
+  }
+
   // Session recording check
   function checkSessionRecordingEnabled() {
     fetch(apiUrls.checkRecording, {
@@ -647,6 +966,7 @@
   window.addEventListener('beforeunload', function() {
     stopRRWebRecording();
     sendSessionReplayEvents();
+    sendFinalEmotionState();
   });
 
   // Public API
