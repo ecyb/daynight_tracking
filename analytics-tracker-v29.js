@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.0.0
- * Last Updated: 2025-10-15
+ * Version: 4.0.0
+ * Last Updated: 2025-10-18
  * 
  * Features:
  * - Real-time pageview tracking
@@ -64,7 +64,7 @@
   // Configuration
   var config = {
     apiBaseUrl: 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1',
-    sessionRecordingEnabled: true,
+    sessionRecordingEnabled: false, // Will be set dynamically from database
     // DOM capture removed - using rrweb only
     compressionEnabled: true,
     performanceTracking: true,
@@ -511,6 +511,14 @@
   
   function startRRWebRecording() {
     try {
+      // CRITICAL: Check if session recording is actually enabled
+      if (!config.sessionRecordingEnabled) {
+        console.log('🚫 [Session Recording] BLOCKED - Session recording is disabled in database');
+        console.log('📊 [Session Recording] Flag value:', config.sessionRecordingEnabled);
+        console.log('💡 [Session Recording] Enable recording in the Users tab of the admin panel');
+        return;
+      }
+      
       debug('Starting rrweb recording', {
         rrwebAlreadyLoaded: typeof window.rrweb !== 'undefined',
         sessionRecordingEnabled: config.sessionRecordingEnabled
@@ -580,6 +588,13 @@
   
   function initializeRRWeb() {
     try {
+      // DOUBLE CHECK: Ensure session recording is still enabled
+      if (!config.sessionRecordingEnabled) {
+        console.log('🚫 [Session Recording] BLOCKED in initializeRRWeb - Session recording is disabled');
+        console.log('📊 [Session Recording] Flag value:', config.sessionRecordingEnabled);
+        return;
+      }
+      
       log('Initializing rrweb recorder...');
       
       // Check if rrweb is properly loaded
@@ -595,6 +610,10 @@
       rrwebRecorder = window.rrweb.record({
         emit(event) {
           try {
+            // Don't process events if recording is disabled
+            if (!config.sessionRecordingEnabled) {
+              return;
+            }
             // sanity: count types
             switch (event.type) {
               case 4: typeCounts.meta++; break;             // Meta
@@ -604,13 +623,15 @@
               default: typeCounts.other++; break;
             }
 
-            // Add to buffer for session replay
-            rrwebEvents.push(event);
-            addToReplayBuffer({
-              type: 'rrweb_event',
-              data: event,
-              timestamp: Date.now()
-            });
+            // Add to buffer for session replay (only if recording is enabled)
+            if (config.sessionRecordingEnabled) {
+              rrwebEvents.push(event);
+              addToReplayBuffer({
+                type: 'rrweb_event',
+                data: event,
+                timestamp: Date.now()
+              });
+            }
             
             // useful breadcrumbs
             if (event.type === 4) log('rrweb: Meta event captured');
@@ -699,6 +720,14 @@
   // Enhanced session replay sending
   function sendSessionReplayEvents(retryCount = 0) {
     if (sessionReplayBuffer.length === 0) return;
+    
+    // CRITICAL: Don't send session replay events if recording is disabled
+    if (!config.sessionRecordingEnabled) {
+      console.log('🚫 [Session Recording] BLOCKED sendSessionReplayEvents - Session recording is disabled');
+      console.log('📊 [Session Recording] Flag value:', config.sessionRecordingEnabled);
+      sessionReplayBuffer.length = 0; // Clear the buffer
+      return;
+    }
     
     var eventsToSend = sessionReplayBuffer.splice(0, 10);
     var maxRetries = 2; // Fewer retries for session replay to avoid blocking
@@ -1053,30 +1082,42 @@
     }
   }
 
-  // Session recording check
+  // Session recording check - returns a promise
   function checkSessionRecordingEnabled() {
-    fetch(apiUrls.checkRecording, {
+    return fetch(apiUrls.checkRecording, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        project_id: projectId,
         tracking_id: trackingId
       })
     })
-    .then(response => response.json())
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Check recording failed - ' + response.status);
+      }
+      return response.json();
+    })
     .then(data => {
       if (data.enabled) {
-        log('Session recording enabled');
+        console.log('✅ [Session Recording] ENABLED - User interactions will be recorded');
+        console.log('📊 [Session Recording] Project ID:', projectId);
+        console.log('📊 [Session Recording] Tracking ID:', trackingId);
         return true;
       } else {
-        log('Session recording disabled');
+        console.log('⛔ [Session Recording] DISABLED - No recording will take place');
+        console.log('📊 [Session Recording] Project ID:', projectId);
+        console.log('📊 [Session Recording] Tracking ID:', trackingId);
+        console.log('💡 [Session Recording] Enable recording in the Users tab of the admin panel');
         return false;
       }
     })
     .catch(error => {
       warn('Session recording check failed:', error);
-      return true; // Default to enabled
+      console.log('⚠️ [Session Recording] Check failed, defaulting to DISABLED for safety');
+      return false; // Default to disabled for safety
     });
   }
 
@@ -1100,9 +1141,14 @@
     debug('Setting up error tracking');
     setupErrorTracking();
     
-    // Start rrweb recording instead of DOM capture
-    debug('Starting rrweb recording');
-    startRRWebRecording();
+    // Start rrweb recording instead of DOM capture (only if enabled)
+    if (config.sessionRecordingEnabled) {
+      debug('Starting rrweb recording');
+      startRRWebRecording();
+    } else {
+      console.log('🚫 [Session Recording] SKIPPED in initializeSession - Session recording is disabled');
+      console.log('📊 [Session Recording] Flag value:', config.sessionRecordingEnabled);
+    }
     
     // Setup event listeners
     debug('Setting up event listeners');
@@ -1159,7 +1205,6 @@
     debug('Configuration loaded', {
       trackingId: trackingId,
       projectId: projectId,
-      sessionRecordingEnabled: config.sessionRecordingEnabled,
       debugMode: config.debugMode
     });
     
@@ -1167,15 +1212,34 @@
     log('Tracking ID:', trackingId);
     log('Project ID:', projectId);
     
-    if (config.sessionRecordingEnabled) {
-      debug('Session recording enabled, initializing session');
-      initializeSession();
-    } else {
-      debug('Session recording disabled, skipping session initialization');
-    }
+    // Check database to see if session recording is enabled
+    console.log('🔍 [Session Recording] Checking database status...');
+    console.log('📊 [Session Recording] Project ID:', projectId);
+    console.log('📊 [Session Recording] Tracking ID:', trackingId);
     
-    log('Analytics tracking initialized');
-    debug('Analytics tracker initialization completed');
+    checkSessionRecordingEnabled().then(function(enabled) {
+      config.sessionRecordingEnabled = enabled;
+      
+      // ALWAYS show the flag value prominently
+      console.log('🎯 [Session Recording] DATABASE FLAG VALUE:', enabled);
+      console.log('🎯 [Session Recording] config.sessionRecordingEnabled:', config.sessionRecordingEnabled);
+      
+      if (config.sessionRecordingEnabled) {
+        console.log('✅ [Session Recording] ENABLED - Will start rrweb recording');
+        debug('Session recording enabled, initializing session');
+        initializeSession();
+      } else {
+        console.log('⛔ [Session Recording] DISABLED - Will NOT start rrweb recording');
+        console.log('💡 [Session Recording] Enable recording in the Users tab of the admin panel');
+        debug('Session recording disabled, skipping session initialization');
+        // Still track pageviews even if recording is disabled
+        sessionId = 'sess_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        trackPageView();
+      }
+      
+      log('Analytics tracking initialized');
+      debug('Analytics tracker initialization completed');
+    });
   }
 
   // Start when DOM is ready
