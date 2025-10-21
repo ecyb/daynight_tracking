@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 4.0.0
- * Last Updated: 2025-10-18
+ * Version: 30.0.0
+ * Last Updated: 2025-10-21
  * 
  * Features:
  * - Real-time pageview tracking
@@ -61,9 +61,13 @@
     return element;
   };
   
+  // Supabase configuration
+  var SUPABASE_URL = 'https://ovaagxrbaxxhlrhbyomt.supabase.co';
+  var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92YWFneHJiYXh4aGxyaGJ5b210Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk4NjcxNTMsImV4cCI6MjA3NTQ0MzE1M30.NpR3791btOTVak--m-gQNK6KyJCRN8wbQThGPeCmX98';
+  
   // Configuration
   var config = {
-    apiBaseUrl: 'https://ovaagxrbaxxhlrhbyomt.supabase.co/functions/v1',
+    apiBaseUrl: SUPABASE_URL + '/functions/v1',
     sessionRecordingEnabled: false, // Will be set dynamically from database
     // DOM capture removed - using rrweb only
     compressionEnabled: true,
@@ -80,8 +84,7 @@
   var apiUrls = {
     track: config.apiBaseUrl + '/track',
     behavior: config.apiBaseUrl + '/track-behavior',
-    sessionReplay: config.apiBaseUrl + '/track-session-replay',
-    checkRecording: config.apiBaseUrl + '/check-session-recording'
+    sessionReplay: config.apiBaseUrl + '/track-session-replay'
   };
 
   // Session management
@@ -1082,34 +1085,39 @@
     }
   }
 
-  // Session recording check - returns a promise
+  // Session recording check - queries public database directly
   function checkSessionRecordingEnabled() {
-    return fetch(apiUrls.checkRecording, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        project_id: projectId,
-        tracking_id: trackingId
-      })
-    })
+    return fetch(
+      SUPABASE_URL + '/rest/v1/session_recording_config?project_id=eq.' + projectId + '&select=enabled',
+      {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
     .then(response => {
       if (!response.ok) {
+        console.log('⚠️ [Session Recording] API Response Status:', response.status);
         throw new Error('Check recording failed - ' + response.status);
       }
       return response.json();
     })
     .then(data => {
-      if (data.enabled) {
+      console.log('📡 [Session Recording] Config data received:', data);
+      var enabled = data.length > 0 ? data[0].enabled : false;
+      if (enabled) {
         console.log('✅ [Session Recording] ENABLED - User interactions will be recorded');
         console.log('📊 [Session Recording] Project ID:', projectId);
         console.log('📊 [Session Recording] Tracking ID:', trackingId);
+        console.log('📹 [Session Recording] Status: ACTIVE ✅');
         return true;
       } else {
         console.log('⛔ [Session Recording] DISABLED - No recording will take place');
         console.log('📊 [Session Recording] Project ID:', projectId);
         console.log('📊 [Session Recording] Tracking ID:', trackingId);
+        console.log('📹 [Session Recording] Status: INACTIVE ❌');
         console.log('💡 [Session Recording] Enable recording in the Users tab of the admin panel');
         return false;
       }
@@ -1117,6 +1125,8 @@
     .catch(error => {
       warn('Session recording check failed:', error);
       console.log('⚠️ [Session Recording] Check failed, defaulting to DISABLED for safety');
+      console.log('📹 [Session Recording] Status: ERROR - DISABLED ❌');
+      console.log('💡 [Session Recording] Ensure the session_recording_config table exists and has proper RLS policies');
       return false; // Default to disabled for safety
     });
   }
