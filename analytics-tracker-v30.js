@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 30.0.0
- * Last Updated: 2025-10-21
+ * Version: 3.1.0
+ * Last Updated: 2025-10-23
  * 
  * Features:
  * - Real-time pageview tracking
@@ -795,10 +795,21 @@
     });
   }
 
+  // Extract UTM parameters from URL
+  function extractUTMParams() {
+    var params = new URLSearchParams(window.location.search);
+    return {
+      utm_source: params.get('utm_source') || undefined,
+      utm_medium: params.get('utm_medium') || undefined,
+      utm_campaign: params.get('utm_campaign') || undefined
+    };
+  }
+
   // Pageview tracking
   function trackPageView() {
     var currentPath = window.location.pathname + window.location.search;
     var currentTime = Date.now();
+    var utmParams = extractUTMParams();
     
     fetch(apiUrls.track, {
       method: 'POST',
@@ -817,6 +828,9 @@
         viewport_height: window.innerHeight,
         language: navigator.language,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        utm_source: utmParams.utm_source,
+        utm_medium: utmParams.utm_medium,
+        utm_campaign: utmParams.utm_campaign,
         session_id: sessionId,
         timestamp: currentTime
       })
