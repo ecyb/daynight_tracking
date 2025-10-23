@@ -1216,6 +1216,18 @@
     exitIntentTriggered: false
   };
 
+  // Detect device type
+  function detectDevice() {
+    var ua = navigator.userAgent.toLowerCase();
+    if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(ua)) {
+      return 'tablet';
+    }
+    if (/Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(ua)) {
+      return 'mobile';
+    }
+    return 'desktop';
+  }
+
   // Fetch widget configuration from backend
   function fetchWidgetConfig() {
     if (!trackingId || trackingId === 'your_tracking_id_here') {
