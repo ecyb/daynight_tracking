@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.1.1
+ * Version: 3.2.0
  * Last Updated: 2025-10-23
  * 
  * Features:
@@ -1366,11 +1366,15 @@
       'top-left': 'top: 20px; left: 20px;'
     };
 
+    var content = widget.content || {};
+    var bgColor = content.background_color || '#667eea';
+    var textColor = content.text_color || '#ffffff';
+
     var pillHtml = '<div id="is-widget-pill" class="is-widget-pill" style="' +
       'position: fixed; ' +
       positionStyles[position] +
-      'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
-      'color: white; ' +
+      'background: ' + bgColor + '; ' +
+      'color: ' + textColor + '; ' +
       'padding: 12px 24px; ' +
       'border-radius: 50px; ' +
       'box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); ' +
@@ -1438,6 +1442,9 @@
 
   // Generate content based on widget type
   function generateWidgetContent(type, content) {
+    var bgColor = content.background_color || '#667eea';
+    var textColor = content.text_color || '#ffffff';
+    
     switch (type) {
       case 'offer':
         return '<div style="text-align: center;">' +
@@ -1446,8 +1453,8 @@
           '<p style="margin: 0 0 16px 0; color: #666; font-size: 14px;">' + (content.description || 'Limited time offer') + '</p>' +
           (content.promo_code ? '<div style="background: #f3f4f6; padding: 12px; border-radius: 8px; font-weight: 600; margin-bottom: 16px; font-size: 18px; letter-spacing: 1px;">' + content.promo_code + '</div>' : '') +
           '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
-          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
-          'color: white; ' +
+          'background: ' + bgColor + '; ' +
+          'color: ' + textColor + '; ' +
           'border: none; ' +
           'padding: 12px 32px; ' +
           'border-radius: 8px; ' +
@@ -1487,8 +1494,8 @@
           '<h3 style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Take Action') + '</h3>' +
           '<p style="margin: 0 0 20px 0; color: #666; font-size: 14px;">' + (content.description || '') + '</p>' +
           '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
-          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
-          'color: white; ' +
+          'background: ' + bgColor + '; ' +
+          'color: ' + textColor + '; ' +
           'border: none; ' +
           'padding: 14px 32px; ' +
           'border-radius: 8px; ' +
@@ -1507,11 +1514,12 @@
           '</div>' +
           '<div style="font-size: 24px; color: #fbbf24; margin-bottom: 8px;">★★★★★</div>' +
           '</div>' +
-          '<p style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 15px; font-style: italic; text-align: center;">"' + (content.quote || 'Amazing service!') + '"</p>' +
-          '<p style="margin: 0; color: #666; font-size: 14px; text-align: center;"><strong>' + (content.name || 'Customer') + '</strong></p>' +
+          '<p style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 15px; font-style: italic; text-align: center;">"' + (content.description || content.quote || 'Amazing service!') + '"</p>' +
+          '<p style="margin: 0; color: #666; font-size: 14px; text-align: center;"><strong>' + (content.author_name || content.name || 'Customer') + '</strong>' +
+          (content.author_title ? '<br/><span style="font-size: 12px;">' + content.author_title + '</span>' : '') + '</p>' +
           (content.cta_text ? '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
-          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
-          'color: white; ' +
+          'background: ' + bgColor + '; ' +
+          'color: ' + textColor + '; ' +
           'border: none; ' +
           'padding: 12px 32px; ' +
           'border-radius: 8px; ' +
@@ -1535,8 +1543,8 @@
           '" />' +
           (content.show_name ? '<input type="text" name="name" placeholder="Your name" style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />' : '') +
           '<button type="submit" style="' +
-          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
-          'color: white; ' +
+          'background: ' + bgColor + '; ' +
+          'color: ' + textColor + '; ' +
           'border: none; ' +
           'padding: 12px; ' +
           'border-radius: 8px; ' +
