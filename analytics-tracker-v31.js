@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.1.0
+ * Version: 3.1.1
  * Last Updated: 2025-10-23
  * 
  * Features:
@@ -1202,6 +1202,488 @@
     sendFinalEmotionState();
   });
 
+  // ============================================
+  // CONVERSION WIDGET SYSTEM
+  // ============================================
+  
+  var widgetState = {
+    loaded: false,
+    widgets: [],
+    activeWidget: null,
+    shownWidgets: new Set(),
+    timeOnPage: 0,
+    maxScrollDepth: 0,
+    exitIntentTriggered: false
+  };
+
+  // Fetch widget configuration from backend
+  function fetchWidgetConfig() {
+    if (!trackingId || trackingId === 'your_tracking_id_here') {
+      debug('Widget config fetch skipped: invalid tracking ID');
+      return Promise.resolve([]);
+    }
+
+    var device = detectDevice();
+    var referrer = document.referrer || '';
+    var pagePath = window.location.pathname;
+
+    return fetch(config.apiBaseUrl + '/get-widget-config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        tracking_id: trackingId,
+        page_path: pagePath,
+        referrer: referrer,
+        device: device
+      })
+    })
+    .then(function(response) {
+      if (!response.ok) throw new Error('Widget config fetch failed');
+      return response.json();
+    })
+    .then(function(data) {
+      debug('Widget config loaded:', data);
+      return data.widgets || [];
+    })
+    .catch(function(error) {
+      console.error('Error fetching widget config:', error);
+      return [];
+    });
+  }
+
+  // Track widget interaction
+  function trackWidgetInteraction(widgetId, interactionType, interactionData) {
+    if (!trackingId || !sessionId) return;
+
+    var device = detectDevice();
+    var country = 'Unknown'; // Could be enhanced with IP geolocation
+    var pagePath = window.location.pathname;
+
+    fetch(config.apiBaseUrl + '/track-widget-interaction', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        tracking_id: trackingId,
+        widget_id: widgetId,
+        session_id: sessionId,
+        interaction_type: interactionType,
+        page_path: pagePath,
+        interaction_data: interactionData || {},
+        user_agent: navigator.userAgent,
+        device: device,
+        country: country
+      })
+    })
+    .then(function(response) {
+      if (response.ok) {
+        debug('Widget interaction tracked:', interactionType);
+      }
+    })
+    .catch(function(error) {
+      console.error('Error tracking widget interaction:', error);
+    });
+  }
+
+  // Check if widget triggers are met
+  function checkWidgetTriggers(widget) {
+    if (!widget.widget_triggers || widget.widget_triggers.length === 0) {
+      return true; // No triggers = always show
+    }
+
+    // Check if ALL triggers are met (AND logic)
+    return widget.widget_triggers.every(function(trigger) {
+      var config = trigger.trigger_config;
+
+      switch (trigger.trigger_type) {
+        case 'time_on_page':
+          return widgetState.timeOnPage >= (config.seconds || 0);
+
+        case 'scroll_depth':
+          return widgetState.maxScrollDepth >= (config.percentage || 0);
+
+        case 'exit_intent':
+          return widgetState.exitIntentTriggered;
+
+        case 'visit_count':
+          var visits = parseInt(localStorage.getItem('_is_visit_count') || '0');
+          return visits >= (config.count || 1);
+
+        // Page match and device triggers are evaluated server-side
+        case 'page_match':
+        case 'referrer_match':
+        case 'device':
+          return true;
+
+        default:
+          return true;
+      }
+    });
+  }
+
+  // Find next widget to show
+  function findNextWidget() {
+    if (widgetState.widgets.length === 0) return null;
+
+    // Find first widget that:
+    // 1. Hasn't been shown yet
+    // 2. Meets all trigger conditions
+    // 3. Has highest priority
+    for (var i = 0; i < widgetState.widgets.length; i++) {
+      var widget = widgetState.widgets[i];
+      if (!widgetState.shownWidgets.has(widget.id) && checkWidgetTriggers(widget)) {
+        return widget;
+      }
+    }
+
+    return null;
+  }
+
+  // Create widget pill HTML
+  function createWidgetPill(widget) {
+    var position = widget.pill_position || 'bottom-right';
+    var positionStyles = {
+      'bottom-right': 'bottom: 20px; right: 20px;',
+      'bottom-left': 'bottom: 20px; left: 20px;',
+      'top-right': 'top: 20px; right: 20px;',
+      'top-left': 'top: 20px; left: 20px;'
+    };
+
+    var pillHtml = '<div id="is-widget-pill" class="is-widget-pill" style="' +
+      'position: fixed; ' +
+      positionStyles[position] +
+      'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
+      'color: white; ' +
+      'padding: 12px 24px; ' +
+      'border-radius: 50px; ' +
+      'box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); ' +
+      'cursor: pointer; ' +
+      'z-index: 999999; ' +
+      'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; ' +
+      'font-size: 14px; ' +
+      'font-weight: 600; ' +
+      'display: flex; ' +
+      'align-items: center; ' +
+      'gap: 8px; ' +
+      'transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); ' +
+      'animation: is-pill-enter 0.5s cubic-bezier(0.4, 0, 0.2, 1); ' +
+      '">' +
+      (widget.pill_icon || '✨') + ' ' +
+      widget.pill_text +
+      '</div>';
+
+    return pillHtml;
+  }
+
+  // Create widget panel HTML
+  function createWidgetPanel(widget) {
+    var position = widget.pill_position || 'bottom-right';
+    var isRight = position.includes('right');
+    var isBottom = position.includes('bottom');
+
+    var positionStyles = isRight ? 'right: 20px;' : 'left: 20px;';
+    positionStyles += isBottom ? 'bottom: 20px;' : 'top: 20px;';
+
+    var content = widget.content || {};
+    var contentHtml = generateWidgetContent(widget.widget_type, content);
+
+    var panelHtml = '<div id="is-widget-panel" class="is-widget-panel" style="' +
+      'position: fixed; ' +
+      positionStyles +
+      'background: white; ' +
+      'border-radius: 16px; ' +
+      'box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2); ' +
+      'padding: 24px; ' +
+      'max-width: 400px; ' +
+      'width: 90vw; ' +
+      'z-index: 999999; ' +
+      'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; ' +
+      'animation: is-panel-enter 0.4s cubic-bezier(0.4, 0, 0.2, 1); ' +
+      'transform-origin: ' + (isRight ? 'right' : 'left') + ' ' + (isBottom ? 'bottom' : 'top') + '; ' +
+      '">' +
+      '<button id="is-widget-close" style="' +
+      'position: absolute; ' +
+      'top: 12px; ' +
+      'right: 12px; ' +
+      'background: transparent; ' +
+      'border: none; ' +
+      'font-size: 24px; ' +
+      'color: #666; ' +
+      'cursor: pointer; ' +
+      'padding: 0; ' +
+      'line-height: 1; ' +
+      '">×</button>' +
+      contentHtml +
+      '</div>';
+
+    return panelHtml;
+  }
+
+  // Generate content based on widget type
+  function generateWidgetContent(type, content) {
+    switch (type) {
+      case 'offer':
+        return '<div style="text-align: center;">' +
+          '<div style="font-size: 32px; margin-bottom: 12px;">' + (content.icon || '🎉') + '</div>' +
+          '<h3 style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Special Offer!') + '</h3>' +
+          '<p style="margin: 0 0 16px 0; color: #666; font-size: 14px;">' + (content.description || 'Limited time offer') + '</p>' +
+          (content.promo_code ? '<div style="background: #f3f4f6; padding: 12px; border-radius: 8px; font-weight: 600; margin-bottom: 16px; font-size: 18px; letter-spacing: 1px;">' + content.promo_code + '</div>' : '') +
+          '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
+          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
+          'color: white; ' +
+          'border: none; ' +
+          'padding: 12px 32px; ' +
+          'border-radius: 8px; ' +
+          'font-weight: 600; ' +
+          'cursor: pointer; ' +
+          'width: 100%; ' +
+          'font-size: 16px; ' +
+          '">' + (content.cta_text || 'Claim Offer') + '</button>' +
+          '</div>';
+
+      case 'contact':
+        var contactOptions = content.options || [];
+        return '<div>' +
+          '<h3 style="margin: 0 0 16px 0; color: #1a1a1a; font-size: 18px; text-align: center;">' + (content.title || 'Get in Touch') + '</h3>' +
+          '<div style="display: flex; flex-direction: column; gap: 12px;">' +
+          contactOptions.map(function(option) {
+            return '<a href="' + option.url + '" target="_blank" onclick="window.InsightStreamAnalytics.widgetContactClick(\'' + option.type + '\')" style="' +
+            'display: flex; ' +
+            'align-items: center; ' +
+            'gap: 12px; ' +
+            'padding: 14px; ' +
+            'background: #f9fafb; ' +
+            'border-radius: 8px; ' +
+            'text-decoration: none; ' +
+            'color: #1a1a1a; ' +
+            'transition: all 0.2s; ' +
+            '">' +
+            '<span style="font-size: 20px;">' + (option.icon || '📞') + '</span>' +
+            '<span style="font-weight: 500;">' + option.label + '</span>' +
+            '</a>';
+          }).join('') +
+          '</div>' +
+          '</div>';
+
+      case 'action':
+        return '<div style="text-align: center;">' +
+          '<h3 style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Take Action') + '</h3>' +
+          '<p style="margin: 0 0 20px 0; color: #666; font-size: 14px;">' + (content.description || '') + '</p>' +
+          '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
+          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
+          'color: white; ' +
+          'border: none; ' +
+          'padding: 14px 32px; ' +
+          'border-radius: 8px; ' +
+          'font-weight: 600; ' +
+          'cursor: pointer; ' +
+          'width: 100%; ' +
+          'font-size: 16px; ' +
+          '">' + (content.cta_text || 'Get Started') + '</button>' +
+          '</div>';
+
+      case 'testimonial':
+        return '<div>' +
+          '<div style="text-align: center; margin-bottom: 16px;">' +
+          '<div style="width: 60px; height: 60px; border-radius: 50%; background: #f3f4f6; margin: 0 auto 12px; overflow: hidden;">' +
+          (content.avatar ? '<img src="' + content.avatar + '" style="width: 100%; height: 100%; object-fit: cover;" />' : '<div style="line-height: 60px; font-size: 24px;">👤</div>') +
+          '</div>' +
+          '<div style="font-size: 24px; color: #fbbf24; margin-bottom: 8px;">★★★★★</div>' +
+          '</div>' +
+          '<p style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 15px; font-style: italic; text-align: center;">"' + (content.quote || 'Amazing service!') + '"</p>' +
+          '<p style="margin: 0; color: #666; font-size: 14px; text-align: center;"><strong>' + (content.name || 'Customer') + '</strong></p>' +
+          (content.cta_text ? '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
+          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
+          'color: white; ' +
+          'border: none; ' +
+          'padding: 12px 32px; ' +
+          'border-radius: 8px; ' +
+          'font-weight: 600; ' +
+          'cursor: pointer; ' +
+          'width: 100%; ' +
+          'margin-top: 16px; ' +
+          'font-size: 16px; ' +
+          '">' + content.cta_text + '</button>' : '') +
+          '</div>';
+
+      case 'form':
+        return '<div>' +
+          '<h3 style="margin: 0 0 16px 0; color: #1a1a1a; font-size: 18px; text-align: center;">' + (content.title || 'Stay Updated') + '</h3>' +
+          '<form id="is-widget-form" onsubmit="window.InsightStreamAnalytics.widgetFormSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">' +
+          '<input type="email" name="email" placeholder="' + (content.email_placeholder || 'Enter your email') + '" required style="' +
+          'padding: 12px; ' +
+          'border: 1px solid #e5e7eb; ' +
+          'border-radius: 8px; ' +
+          'font-size: 14px; ' +
+          '" />' +
+          (content.show_name ? '<input type="text" name="name" placeholder="Your name" style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />' : '') +
+          '<button type="submit" style="' +
+          'background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); ' +
+          'color: white; ' +
+          'border: none; ' +
+          'padding: 12px; ' +
+          'border-radius: 8px; ' +
+          'font-weight: 600; ' +
+          'cursor: pointer; ' +
+          'font-size: 16px; ' +
+          '">' + (content.submit_text || 'Submit') + '</button>' +
+          '</form>' +
+          '</div>';
+
+      default:
+        return '<p>Unknown widget type</p>';
+    }
+  }
+
+  // Show widget pill
+  function showWidgetPill(widget) {
+    if (widgetState.activeWidget) return; // Don't show if another widget is active
+
+    var pillHtml = createWidgetPill(widget);
+    var container = document.createElement('div');
+    container.innerHTML = pillHtml;
+    document.body.appendChild(container.firstChild);
+
+    widgetState.activeWidget = widget;
+    widgetState.shownWidgets.add(widget.id);
+
+    // Track view
+    trackWidgetInteraction(widget.id, 'view', {});
+
+    // Add click handler
+    var pill = document.getElementById('is-widget-pill');
+    if (pill) {
+      pill.addEventListener('click', function() {
+        expandWidget(widget);
+      });
+
+      // Hover effect
+      pill.addEventListener('mouseenter', function() {
+        pill.style.transform = 'scale(1.05)';
+        pill.style.boxShadow = '0 6px 24px rgba(0, 0, 0, 0.2)';
+      });
+      pill.addEventListener('mouseleave', function() {
+        pill.style.transform = 'scale(1)';
+        pill.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.15)';
+      });
+    }
+  }
+
+  // Expand widget to panel
+  function expandWidget(widget) {
+    var pill = document.getElementById('is-widget-pill');
+    if (pill) {
+      pill.style.animation = 'is-pill-exit 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
+      setTimeout(function() {
+        pill.remove();
+      }, 300);
+    }
+
+    // Track expand
+    trackWidgetInteraction(widget.id, 'expand', {});
+
+    var panelHtml = createWidgetPanel(widget);
+    var container = document.createElement('div');
+    container.innerHTML = panelHtml;
+    document.body.appendChild(container.firstChild);
+
+    // Add close handler
+    var closeBtn = document.getElementById('is-widget-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function() {
+        closeWidget();
+      });
+    }
+  }
+
+  // Close widget
+  function closeWidget() {
+    var panel = document.getElementById('is-widget-panel');
+    if (panel) {
+      panel.style.animation = 'is-panel-exit 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
+      setTimeout(function() {
+        panel.remove();
+        widgetState.activeWidget = null;
+        
+        // Show next widget after delay
+        setTimeout(function() {
+          checkAndShowWidget();
+        }, 5000);
+      }, 300);
+    }
+
+    // Track close
+    if (widgetState.activeWidget) {
+      trackWidgetInteraction(widgetState.activeWidget.id, 'close', {});
+    }
+  }
+
+  // Check and show next widget
+  function checkAndShowWidget() {
+    if (widgetState.activeWidget) return;
+
+    var widget = findNextWidget();
+    if (widget) {
+      showWidgetPill(widget);
+    }
+  }
+
+  // Initialize widget system
+  function initializeWidgets() {
+    fetchWidgetConfig().then(function(widgets) {
+      widgetState.widgets = widgets;
+      widgetState.loaded = true;
+
+      if (widgets.length > 0) {
+        debug('Widgets loaded:', widgets.length);
+        checkAndShowWidget();
+      }
+    });
+
+    // Track time on page
+    setInterval(function() {
+      widgetState.timeOnPage++;
+      checkAndShowWidget();
+    }, 1000);
+
+    // Track scroll depth
+    window.addEventListener('scroll', function() {
+      var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      var docHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      var scrollPercent = (scrollTop / docHeight) * 100;
+      
+      if (scrollPercent > widgetState.maxScrollDepth) {
+        widgetState.maxScrollDepth = scrollPercent;
+        checkAndShowWidget();
+      }
+    });
+
+    // Track exit intent
+    document.addEventListener('mouseleave', function(e) {
+      if (e.clientY < 0 && !widgetState.exitIntentTriggered) {
+        widgetState.exitIntentTriggered = true;
+        checkAndShowWidget();
+      }
+    });
+
+    // Increment visit count
+    var visits = parseInt(localStorage.getItem('_is_visit_count') || '0');
+    localStorage.setItem('_is_visit_count', (visits + 1).toString());
+  }
+
+  // Add CSS animations
+  var style = document.createElement('style');
+  style.textContent = '@keyframes is-pill-enter { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } } ' +
+    '@keyframes is-pill-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.8); } } ' +
+    '@keyframes is-panel-enter { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } } ' +
+    '@keyframes is-panel-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.9); } }';
+  document.head.appendChild(style);
+
   // Public API
   window.InsightStreamAnalytics = {
     track: trackCustomEvent,
@@ -1210,6 +1692,45 @@
     getConfig: function() { return config; },
     setConfig: function(newConfig) { 
       Object.assign(config, newConfig); 
+    },
+    // Widget API
+    widgetAction: function(url) {
+      if (widgetState.activeWidget) {
+        trackWidgetInteraction(widgetState.activeWidget.id, 'cta_click', { url: url });
+      }
+      if (url && url !== '#') {
+        window.location.href = url;
+      }
+      closeWidget();
+    },
+    widgetContactClick: function(type) {
+      if (widgetState.activeWidget) {
+        trackWidgetInteraction(widgetState.activeWidget.id, 'cta_click', { contact_type: type });
+      }
+    },
+    widgetFormSubmit: function(event) {
+      event.preventDefault();
+      var form = event.target;
+      var formData = new FormData(form);
+      var data = {};
+      formData.forEach(function(value, key) {
+        data[key] = value;
+      });
+
+      if (widgetState.activeWidget) {
+        trackWidgetInteraction(widgetState.activeWidget.id, 'submit', data);
+      }
+
+      // Show success message
+      form.innerHTML = '<div style="text-align: center; padding: 20px;">' +
+        '<div style="font-size: 48px; margin-bottom: 12px;">✅</div>' +
+        '<p style="margin: 0; color: #1a1a1a; font-weight: 600;">Thank you!</p>' +
+        '<p style="margin: 8px 0 0 0; color: #666; font-size: 14px;">We\'ll be in touch soon.</p>' +
+        '</div>';
+
+      setTimeout(function() {
+        closeWidget();
+      }, 2000);
     }
   };
 
@@ -1263,6 +1784,11 @@
       
       log('Analytics tracking initialized');
       debug('Analytics tracker initialization completed');
+      
+      // Initialize widget system after analytics
+      setTimeout(function() {
+        initializeWidgets();
+      }, 1000);
     });
   }
 
