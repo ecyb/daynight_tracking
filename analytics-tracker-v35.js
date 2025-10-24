@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.2.0
- * Last Updated: 2025-10-23
+ * Version: 3.3.1
+ * Last Updated: 2025-10-24
  * 
  * Features:
  * - Real-time pageview tracking
@@ -89,6 +89,7 @@
 
   // Session management
   var sessionId = null;
+  var visitorId = null; // Persistent visitor ID across sessions
   var sessionReplayBuffer = [];
   // DOM capture variables removed - using rrweb only
   var performanceData = {};
@@ -818,6 +819,8 @@
       },
       body: JSON.stringify({
         tracking_id: trackingId,
+        session_id: sessionId,
+        visitor_id: visitorId,
         event_type: 'pageview',
         path: currentPath,
         referrer: document.referrer,
@@ -831,7 +834,6 @@
         utm_source: utmParams.utm_source,
         utm_medium: utmParams.utm_medium,
         utm_campaign: utmParams.utm_campaign,
-        session_id: sessionId,
         timestamp: currentTime
       })
     })
@@ -853,10 +855,11 @@
       },
       body: JSON.stringify({
         tracking_id: trackingId,
+        session_id: sessionId,
+        visitor_id: visitorId,
         event_type: 'event',
         event_name: eventName,
         event_data: eventData || {},
-        session_id: sessionId,
         timestamp: Date.now()
       })
     })
@@ -1150,8 +1153,25 @@
     sessionId = 'sess_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
     log('New session created:', sessionId);
     
+    // Get or create persistent visitor ID
+    try {
+      visitorId = localStorage.getItem('_is_visitor_id');
+      if (!visitorId) {
+        visitorId = 'vis_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+        localStorage.setItem('_is_visitor_id', visitorId);
+        log('New visitor ID created:', visitorId);
+      } else {
+        log('Existing visitor ID found:', visitorId);
+      }
+    } catch (e) {
+      // If localStorage is not available, generate a session-only visitor ID
+      visitorId = 'vis_temp_' + Math.random().toString(36).substr(2, 9);
+      warn('localStorage not available, using temporary visitor ID');
+    }
+    
     debug('Session initialization started', {
       sessionId: sessionId,
+      visitorId: visitorId,
       trackingId: trackingId,
       projectId: projectId,
       timestamp: Date.now()
@@ -1302,8 +1322,163 @@
     });
   }
 
+  // Save form submission to database
+  function saveFormSubmission(widgetId, email, name) {
+    if (!trackingId || !projectId) return;
+
+    fetch(config.apiBaseUrl + '/save-widget-submission', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        widget_id: widgetId,
+        project_id: projectId,
+        email: email,
+        name: name || null,
+        form_data: {}
+      })
+    })
+    .then(function(response) {
+      if (response.ok) {
+        debug('Form submission saved');
+      }
+    })
+    .catch(function(error) {
+      console.error('Error saving form submission:', error);
+    });
+  }
+
+  // ========================================
+  // ADVANCED FEATURE HELPERS
+  // ========================================
+  
+  // Check frequency control
+  function checkFrequency(widget) {
+    var frequencyType = widget.frequency_type || 'always';
+    var widgetKey = 'widget_frequency_' + widget.id;
+    
+    switch (frequencyType) {
+      case 'once_session':
+        if (sessionStorage.getItem(widgetKey)) {
+          return false; // Already shown this session
+        }
+        break;
+        
+      case 'once_day':
+        var lastShown = localStorage.getItem(widgetKey);
+        if (lastShown) {
+          var daysSince = (Date.now() - parseInt(lastShown)) / (24 * 60 * 60 * 1000);
+          if (daysSince < 1) return false;
+        }
+        break;
+        
+      case 'once_week':
+        var lastShown = localStorage.getItem(widgetKey);
+        if (lastShown) {
+          var daysSince = (Date.now() - parseInt(lastShown)) / (24 * 60 * 60 * 1000);
+          if (daysSince < 7) return false;
+        }
+        break;
+        
+      case 'max_views':
+        var viewCount = parseInt(localStorage.getItem(widgetKey + '_count') || '0');
+        var maxViews = widget.frequency_value || 999;
+        if (viewCount >= maxViews) return false;
+        break;
+        
+      case 'after_conversion':
+        if (localStorage.getItem(widgetKey + '_converted')) {
+          return false; // Already converted
+        }
+        break;
+    }
+    
+    // Check cooldown
+    if (widget.cooldown_days) {
+      var lastShown = localStorage.getItem(widgetKey);
+      if (lastShown) {
+        var daysSince = (Date.now() - parseInt(lastShown)) / (24 * 60 * 60 * 1000);
+        if (daysSince < widget.cooldown_days) return false;
+      }
+    }
+    
+    return true;
+  }
+  
+  // Record widget impression
+  function recordImpression(widget) {
+    var widgetKey = 'widget_frequency_' + widget.id;
+    var frequencyType = widget.frequency_type || 'always';
+    
+    // Store session flag
+    sessionStorage.setItem(widgetKey, 'shown');
+    
+    // Store persistent flags
+    if (frequencyType === 'once_day' || frequencyType === 'once_week' || widget.cooldown_days) {
+      localStorage.setItem(widgetKey, Date.now().toString());
+    }
+    
+    // Increment view count
+    if (frequencyType === 'max_views') {
+      var count = parseInt(localStorage.getItem(widgetKey + '_count') || '0');
+      localStorage.setItem(widgetKey + '_count', (count + 1).toString());
+    }
+  }
+  
+  // Check advanced targeting
+  function checkAdvancedTargeting(widget) {
+    // Check visitor type
+    if (widget.target_visitor_type && widget.target_visitor_type !== 'all') {
+      var isNewVisitor = !localStorage.getItem('_is_returning_visitor');
+      if (widget.target_visitor_type === 'new' && !isNewVisitor) return false;
+      if (widget.target_visitor_type === 'returning' && isNewVisitor) return false;
+    }
+    
+    // Check UTM parameters
+    var urlParams = new URLSearchParams(window.location.search);
+    if (widget.target_utm_source) {
+      var utmSource = urlParams.get('utm_source');
+      if (!utmSource || utmSource !== widget.target_utm_source) return false;
+    }
+    if (widget.target_utm_campaign) {
+      var utmCampaign = urlParams.get('utm_campaign');
+      if (!utmCampaign || utmCampaign !== widget.target_utm_campaign) return false;
+    }
+    
+    // Check traffic source
+    if (widget.target_traffic_source && widget.target_traffic_source !== 'all') {
+      var referrer = document.referrer;
+      var source = 'direct';
+      
+      if (referrer) {
+        if (referrer.includes('google') || referrer.includes('bing')) source = 'organic';
+        else if (referrer.includes('facebook') || referrer.includes('twitter') || referrer.includes('instagram')) source = 'social';
+        else if (urlParams.get('utm_source')) source = 'paid';
+        else source = 'referral';
+      }
+      
+      if (source !== widget.target_traffic_source) return false;
+    }
+    
+    return true;
+  }
+  
   // Check if widget triggers are met
   function checkWidgetTriggers(widget) {
+    // Check frequency control first
+    if (!checkFrequency(widget)) {
+      debug('Widget blocked by frequency control:', widget.id);
+      return false;
+    }
+    
+    // Check advanced targeting
+    if (!checkAdvancedTargeting(widget)) {
+      debug('Widget blocked by targeting rules:', widget.id);
+      return false;
+    }
+    
     if (!widget.widget_triggers || widget.widget_triggers.length === 0) {
       return true; // No triggers = always show
     }
@@ -1396,30 +1571,92 @@
     return pillHtml;
   }
 
+  // Get animation CSS name
+  function getAnimationCSS(animationType, direction) {
+    if (!animationType || animationType === 'none') return '';
+    
+    var animationMap = {
+      'fade': direction === 'in' ? 'is-fade-in' : 'is-fade-out',
+      'slide': direction === 'in' ? 'is-slide-in' : 'is-slide-out',
+      'bounce': direction === 'in' ? 'is-bounce-in' : 'is-bounce-out',
+      'zoom': direction === 'in' ? 'is-zoom-in' : 'is-zoom-out',
+      'shake': direction === 'in' ? 'is-shake-in' : 'is-shake-in'
+    };
+    
+    return animationMap[animationType] || 'is-fade-in';
+  }
+  
+  // Get widget sizing
+  function getWidgetSize(size) {
+    var sizes = {
+      'small': '320px',
+      'medium': '400px',
+      'large': '500px',
+      'full': '800px'
+    };
+    return sizes[size] || '400px';
+  }
+  
+  // Play sound effect
+  function playSound(soundType, widget) {
+    if (!widget.enable_sound || !soundType) return;
+    
+    try {
+      var audio = new Audio();
+      var soundMap = {
+        'bell': 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBzWM0vPTgjMGHm7A7+OZURE=',
+        'chime': 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBzWM0vPTgjMGHm7A7+OZURE=',
+        'success': 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBzWM0vPTgjMGHm7A7+OZURE='
+      };
+      
+      audio.src = soundMap[soundType] || soundMap.chime;
+      audio.volume = (widget.sound_volume || 50) / 100;
+      audio.play().catch(function(e) {
+        debug('Sound play failed:', e);
+      });
+    } catch (e) {
+      debug('Sound error:', e);
+    }
+  }
+  
   // Create widget panel HTML
   function createWidgetPanel(widget) {
     var position = widget.pill_position || 'bottom-right';
     var isRight = position.includes('right');
     var isBottom = position.includes('bottom');
+    
+    var layoutType = widget.layout_type || 'panel';
+    var widgetSize = getWidgetSize(widget.widget_size);
+    var animationClass = getAnimationCSS(widget.animation_in, 'in');
 
     var positionStyles = isRight ? 'right: 20px;' : 'left: 20px;';
     positionStyles += isBottom ? 'bottom: 20px;' : 'top: 20px;';
+    
+    // For modal layout, center it
+    if (layoutType === 'modal') {
+      positionStyles = 'top: 50%; left: 50%; transform: translate(-50%, -50%);';
+    }
+    // For bar layout, make it full width at top or bottom
+    else if (layoutType === 'bar') {
+      positionStyles = isBottom ? 'bottom: 0; left: 0; right: 0;' : 'top: 0; left: 0; right: 0;';
+      widgetSize = '100%';
+    }
 
     var content = widget.content || {};
-    var contentHtml = generateWidgetContent(widget.widget_type, content);
+    var contentHtml = generateWidgetContent(widget, content);
 
-    var panelHtml = '<div id="is-widget-panel" class="is-widget-panel" style="' +
+    var panelHtml = '<div id="is-widget-panel" class="is-widget-panel" data-widget-id="' + widget.id + '" style="' +
       'position: fixed; ' +
       positionStyles +
       'background: white; ' +
-      'border-radius: 16px; ' +
+      'border-radius: ' + (layoutType === 'bar' ? '0' : '16px') + '; ' +
       'box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2); ' +
       'padding: 24px; ' +
-      'max-width: 400px; ' +
-      'width: 90vw; ' +
+      'max-width: ' + widgetSize + '; ' +
+      (layoutType === 'bar' ? '' : 'width: 90vw; ') +
       'z-index: 999999; ' +
       'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; ' +
-      'animation: is-panel-enter 0.4s cubic-bezier(0.4, 0, 0.2, 1); ' +
+      'animation: ' + animationClass + ' 0.4s cubic-bezier(0.4, 0, 0.2, 1); ' +
       'transform-origin: ' + (isRight ? 'right' : 'left') + ' ' + (isBottom ? 'bottom' : 'top') + '; ' +
       '">' +
       '<button id="is-widget-close" style="' +
@@ -1436,14 +1673,76 @@
       '">×</button>' +
       contentHtml +
       '</div>';
+    
+    // Add modal backdrop if needed
+    if (layoutType === 'modal') {
+      panelHtml = '<div id="is-widget-backdrop" style="' +
+        'position: fixed; ' +
+        'top: 0; left: 0; right: 0; bottom: 0; ' +
+        'background: rgba(0, 0, 0, 0.5); ' +
+        'z-index: 999998; ' +
+        'animation: is-fade-in 0.3s; ' +
+        '"></div>' + panelHtml;
+    }
+    
+    // Play entrance sound
+    playSound(widget.sound_type, widget);
 
     return panelHtml;
   }
 
+  // Create countdown timer HTML
+  function createCountdownHTML(widget) {
+    if (!widget.has_countdown || !widget.countdown_target) return '';
+    
+    var targetTime = new Date(widget.countdown_target).getTime();
+    var now = Date.now();
+    var diff = Math.max(0, targetTime - now);
+    
+    var days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    var seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    return '<div id="is-countdown" style="' +
+      'display: flex; gap: 12px; justify-content: center; margin: 16px 0; ' +
+      'font-family: monospace; font-weight: bold; font-size: 18px; ' +
+      '">' +
+      (days > 0 ? '<div style="text-align: center;"><div style="font-size: 24px;">' + days + '</div><div style="font-size: 10px; color: #666;">DAYS</div></div>' : '') +
+      '<div style="text-align: center;"><div style="font-size: 24px;">' + hours + '</div><div style="font-size: 10px; color: #666;">HRS</div></div>' +
+      '<div style="text-align: center;"><div style="font-size: 24px;">' + minutes + '</div><div style="font-size: 10px; color: #666;">MIN</div></div>' +
+      '<div style="text-align: center;"><div style="font-size: 24px;">' + seconds + '</div><div style="font-size: 10px; color: #666;">SEC</div></div>' +
+      '</div>';
+  }
+  
+  // Create social proof HTML
+  function createSocialProofHTML(widget) {
+    if (!widget.show_social_proof) return '';
+    
+    var proofType = widget.social_proof_type || 'views';
+    var count = widget.social_proof_count || 0;
+    
+    var messages = {
+      'views': '👀 ' + count + ' people viewing',
+      'purchases': '🛒 ' + count + ' purchased today',
+      'signups': '✍️ ' + count + ' signed up today',
+      'custom': widget.social_proof_message || ''
+    };
+    
+    return '<div style="' +
+      'background: #f3f4f6; padding: 8px 12px; border-radius: 6px; ' +
+      'font-size: 12px; color: #666; text-align: center; margin-top: 12px; ' +
+      '">' + messages[proofType] + '</div>';
+  }
+  
   // Generate content based on widget type
-  function generateWidgetContent(type, content) {
+  function generateWidgetContent(widget, content) {
+    var type = widget.widget_type;
     var bgColor = content.background_color || '#667eea';
     var textColor = content.text_color || '#ffffff';
+    
+    var countdownHTML = createCountdownHTML(widget);
+    var socialProofHTML = createSocialProofHTML(widget);
     
     switch (type) {
       case 'offer':
@@ -1451,8 +1750,10 @@
           '<div style="font-size: 32px; margin-bottom: 12px;">' + (content.icon || '🎉') + '</div>' +
           '<h3 style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Special Offer!') + '</h3>' +
           '<p style="margin: 0 0 16px 0; color: #666; font-size: 14px;">' + (content.description || 'Limited time offer') + '</p>' +
+          countdownHTML +
           (content.promo_code ? '<div style="background: #f3f4f6; padding: 12px; border-radius: 8px; font-weight: 600; margin-bottom: 16px; font-size: 18px; letter-spacing: 1px;">' + content.promo_code + '</div>' : '') +
-          '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
+          '<a id="is-widget-cta-offer" href="' + (content.cta_url || '#') + '" target="_blank" style="' +
+          'display: block; ' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
@@ -1462,7 +1763,10 @@
           'cursor: pointer; ' +
           'width: 100%; ' +
           'font-size: 16px; ' +
-          '">' + (content.cta_text || 'Claim Offer') + '</button>' +
+          'text-decoration: none; ' +
+          'text-align: center; ' +
+          '">' + (content.cta_text || 'Claim Offer') + '</a>' +
+          socialProofHTML +
           '</div>';
 
       case 'contact':
@@ -1493,7 +1797,9 @@
         return '<div style="text-align: center;">' +
           '<h3 style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Take Action') + '</h3>' +
           '<p style="margin: 0 0 20px 0; color: #666; font-size: 14px;">' + (content.description || '') + '</p>' +
-          '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
+          countdownHTML +
+          '<a id="is-widget-cta-action" href="' + (content.cta_url || '#') + '" target="_blank" style="' +
+          'display: block; ' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
@@ -1503,7 +1809,10 @@
           'cursor: pointer; ' +
           'width: 100%; ' +
           'font-size: 16px; ' +
-          '">' + (content.cta_text || 'Get Started') + '</button>' +
+          'text-decoration: none; ' +
+          'text-align: center; ' +
+          '">' + (content.cta_text || 'Get Started') + '</a>' +
+          socialProofHTML +
           '</div>';
 
       case 'testimonial':
@@ -1517,7 +1826,8 @@
           '<p style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 15px; font-style: italic; text-align: center;">"' + (content.description || content.quote || 'Amazing service!') + '"</p>' +
           '<p style="margin: 0; color: #666; font-size: 14px; text-align: center;"><strong>' + (content.author_name || content.name || 'Customer') + '</strong>' +
           (content.author_title ? '<br/><span style="font-size: 12px;">' + content.author_title + '</span>' : '') + '</p>' +
-          (content.cta_text ? '<button onclick="window.InsightStreamAnalytics.widgetAction(\'' + (content.cta_url || '#') + '\')" style="' +
+          (content.cta_text ? '<a id="is-widget-cta-testimonial" href="' + (content.cta_url || '#') + '" target="_blank" style="' +
+          'display: block; ' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
@@ -1528,20 +1838,23 @@
           'width: 100%; ' +
           'margin-top: 16px; ' +
           'font-size: 16px; ' +
-          '">' + content.cta_text + '</button>' : '') +
+          'text-decoration: none; ' +
+          'text-align: center; ' +
+          '">' + content.cta_text + '</a>' : '') +
           '</div>';
 
       case 'form':
         return '<div>' +
           '<h3 style="margin: 0 0 16px 0; color: #1a1a1a; font-size: 18px; text-align: center;">' + (content.title || 'Stay Updated') + '</h3>' +
-          '<form id="is-widget-form" onsubmit="window.InsightStreamAnalytics.widgetFormSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">' +
-          '<input type="email" name="email" placeholder="' + (content.email_placeholder || 'Enter your email') + '" required style="' +
+          countdownHTML +
+          '<form id="is-widget-form" style="display: flex; flex-direction: column; gap: 12px;">' +
+          '<input id="is-widget-email" type="email" name="email" placeholder="' + (content.email_placeholder || 'Enter your email') + '" required style="' +
           'padding: 12px; ' +
           'border: 1px solid #e5e7eb; ' +
           'border-radius: 8px; ' +
           'font-size: 14px; ' +
           '" />' +
-          (content.show_name ? '<input type="text" name="name" placeholder="Your name" style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />' : '') +
+          (content.show_name ? '<input id="is-widget-name" type="text" name="name" placeholder="Your name" style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />' : '') +
           '<button type="submit" style="' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
@@ -1553,6 +1866,7 @@
           'font-size: 16px; ' +
           '">' + (content.submit_text || 'Submit') + '</button>' +
           '</form>' +
+          socialProofHTML +
           '</div>';
 
       default:
@@ -1606,28 +1920,128 @@
 
     // Track expand
     trackWidgetInteraction(widget.id, 'expand', {});
+    
+    // Record impression for frequency control
+    recordImpression(widget);
 
     var panelHtml = createWidgetPanel(widget);
     var container = document.createElement('div');
     container.innerHTML = panelHtml;
+    
+    // Handle modal backdrop if present
+    if (widget.layout_type === 'modal') {
+      var backdrop = container.querySelector('#is-widget-backdrop');
+      if (backdrop) {
+        document.body.appendChild(backdrop);
+        backdrop.addEventListener('click', function() {
+          closeWidget(widget);
+        });
+      }
+    }
+    
     document.body.appendChild(container.firstChild);
+
+    // Start countdown timer if enabled
+    if (widget.has_countdown && widget.countdown_target) {
+      var countdownInterval = setInterval(function() {
+        var countdownEl = document.getElementById('is-countdown');
+        if (!countdownEl) {
+          clearInterval(countdownInterval);
+          return;
+        }
+        
+        var targetTime = new Date(widget.countdown_target).getTime();
+        var now = Date.now();
+        var diff = Math.max(0, targetTime - now);
+        
+        if (diff === 0) {
+          clearInterval(countdownInterval);
+          countdownEl.innerHTML = '<div style="color: #ef4444; font-weight: bold;">EXPIRED</div>';
+          return;
+        }
+        
+        var days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        var seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        
+        countdownEl.innerHTML = '<div style="display: flex; gap: 12px; justify-content: center;">' +
+          (days > 0 ? '<div style="text-align: center;"><div style="font-size: 24px;">' + days + '</div><div style="font-size: 10px; color: #666;">DAYS</div></div>' : '') +
+          '<div style="text-align: center;"><div style="font-size: 24px;">' + hours + '</div><div style="font-size: 10px; color: #666;">HRS</div></div>' +
+          '<div style="text-align: center;"><div style="font-size: 24px;">' + minutes + '</div><div style="font-size: 10px; color: #666;">MIN</div></div>' +
+          '<div style="text-align: center;"><div style="font-size: 24px;">' + seconds + '</div><div style="font-size: 10px; color: #666;">SEC</div></div>' +
+          '</div>';
+      }, 1000);
+    }
 
     // Add close handler
     var closeBtn = document.getElementById('is-widget-close');
     if (closeBtn) {
       closeBtn.addEventListener('click', function() {
-        closeWidget();
+        closeWidget(widget);
       });
     }
+
+    // Add form submit handler
+    var form = document.getElementById('is-widget-form');
+    if (form) {
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var email = document.getElementById('is-widget-email').value;
+        var name = document.getElementById('is-widget-name') ? document.getElementById('is-widget-name').value : '';
+        
+        // Save form submission
+        saveFormSubmission(widget.id, email, name);
+        
+        // Track submit and mark as converted
+        trackWidgetInteraction(widget.id, 'submit', { email: email });
+        localStorage.setItem('widget_frequency_' + widget.id + '_converted', 'true');
+        
+        // Play success sound
+        playSound('success', widget);
+        
+        // Show success message
+        var formEl = e.target;
+        formEl.innerHTML = '<div style="text-align: center; color: #10b981; padding: 20px;">' +
+          '<div style="font-size: 48px; margin-bottom: 12px;">✓</div>' +
+          '<div style="font-size: 18px; font-weight: 600;">Thanks for submitting!</div>' +
+          '<div style="font-size: 14px; margin-top: 8px; color: #666;">We\'ll be in touch soon.</div>' +
+          '</div>';
+        
+        // Close after delay
+        setTimeout(function() {
+          closeWidget(widget);
+        }, 2000);
+      });
+    }
+
+    // Add CTA button handlers (for non-form widgets)
+    var ctaButtons = document.querySelectorAll('[id^="is-widget-cta-"]');
+    ctaButtons.forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        trackWidgetInteraction(widget.id, 'click', {});
+        
+        // Mark as converted for CTA clicks
+        localStorage.setItem('widget_frequency_' + widget.id + '_converted', 'true');
+        
+        closeWidget(widget);
+      });
+    });
   }
 
   // Close widget
-  function closeWidget() {
+  function closeWidget(widget) {
     var panel = document.getElementById('is-widget-panel');
+    var backdrop = document.getElementById('is-widget-backdrop');
+    
     if (panel) {
-      panel.style.animation = 'is-panel-exit 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
+      // Apply exit animation
+      var exitAnimation = getAnimationCSS(widget ? widget.animation_out : 'fade', 'out');
+      panel.style.animation = exitAnimation + ' 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
+      
       setTimeout(function() {
         panel.remove();
+        if (backdrop) backdrop.remove();
         widgetState.activeWidget = null;
         
         // Show next widget after delay
@@ -1698,8 +2112,44 @@
 
   // Add CSS animations
   var style = document.createElement('style');
-  style.textContent = '@keyframes is-pill-enter { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } } ' +
+  style.textContent = 
+    // Pill animations
+    '@keyframes is-pill-enter { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } } ' +
     '@keyframes is-pill-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.8); } } ' +
+    
+    // Fade animations
+    '@keyframes is-fade-in { from { opacity: 0; } to { opacity: 1; } } ' +
+    '@keyframes is-fade-out { from { opacity: 1; } to { opacity: 0; } } ' +
+    
+    // Slide animations
+    '@keyframes is-slide-in { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } } ' +
+    '@keyframes is-slide-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(100%); } } ' +
+    
+    // Bounce animations
+    '@keyframes is-bounce-in { ' +
+      '0% { opacity: 0; transform: scale(0.3); } ' +
+      '50% { opacity: 1; transform: scale(1.05); } ' +
+      '70% { transform: scale(0.9); } ' +
+      '100% { transform: scale(1); } ' +
+    '} ' +
+    '@keyframes is-bounce-out { ' +
+      '0% { transform: scale(1); } ' +
+      '50% { transform: scale(1.1); } ' +
+      '100% { opacity: 0; transform: scale(0.3); } ' +
+    '} ' +
+    
+    // Zoom animations
+    '@keyframes is-zoom-in { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } } ' +
+    '@keyframes is-zoom-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.5); } } ' +
+    
+    // Shake animation (entry only)
+    '@keyframes is-shake-in { ' +
+      '0%, 100% { transform: translateX(0); } ' +
+      '10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); } ' +
+      '20%, 40%, 60%, 80% { transform: translateX(10px); } ' +
+    '} ' +
+    
+    // Legacy panel animations (backwards compatibility)
     '@keyframes is-panel-enter { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } } ' +
     '@keyframes is-panel-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.9); } }';
   document.head.appendChild(style);
@@ -1721,7 +2171,7 @@
       if (url && url !== '#') {
         window.location.href = url;
       }
-      closeWidget();
+      closeWidget(widgetState.activeWidget);
     },
     widgetContactClick: function(type) {
       if (widgetState.activeWidget) {
@@ -1749,7 +2199,7 @@
         '</div>';
 
       setTimeout(function() {
-        closeWidget();
+        closeWidget(widgetState.activeWidget);
       }, 2000);
     }
   };
@@ -1773,7 +2223,7 @@
       debugMode: config.debugMode
     });
     
-    log('Insight Stream Analytics Tracker v3.0.0 loaded');
+    log('Insight Stream Analytics Tracker v4.0.0 - Advanced Widget Features loaded');
     log('Tracking ID:', trackingId);
     log('Project ID:', projectId);
     
