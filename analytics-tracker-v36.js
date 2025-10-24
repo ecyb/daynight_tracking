@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 4.0.0
+ * Version: 4.1.0
  * Last Updated: 2025-10-24
  * 
  * Features:
@@ -2168,23 +2168,23 @@
           '<form id="is-widget-form" style="display: flex; flex-direction: column; gap: 12px;">' +
           '<input id="is-widget-name" type="text" name="name" placeholder="' + (content.name_placeholder || 'Your name (optional)') + '" style="' +
           'padding: 12px; ' +
-          'border: 1px solid ' + contentTextColor + '; ' +
-          'border-opacity: 0.2; ' +
+          'border: none; ' +
           'background: ' + contentTextColor + '10; ' +
           'color: ' + contentTextColor + '; ' +
           'border-radius: 8px; ' +
           'font-size: 14px; ' +
           'box-sizing: border-box; ' +
+          'box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); ' +
           '" />' +
           '<input id="is-widget-email" type="email" name="email" placeholder="' + (content.email_placeholder || 'Enter your email') + '" required style="' +
           'padding: 12px; ' +
-          'border: 1px solid ' + contentTextColor + '; ' +
-          'border-opacity: 0.2; ' +
+          'border: none; ' +
           'background: ' + contentTextColor + '10; ' +
           'color: ' + contentTextColor + '; ' +
           'border-radius: 8px; ' +
           'font-size: 14px; ' +
           'box-sizing: border-box; ' +
+          'box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); ' +
           '" />' +
           '<button type="submit" style="' +
           'background: ' + bgColor + '; ' +
