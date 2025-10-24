@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 4.2.0
- * Last Updated: 2025-10-24
+ * Version: 4.3.0
+ * Last Updated: 2025-10-23
  * 
  * Features:
  * - Real-time pageview tracking
@@ -1465,9 +1465,54 @@
     return true;
   }
   
+  // Check page targeting
+  function checkPageTargeting(widget) {
+    // Default to showing on all pages
+    if (!widget.page_targeting || widget.page_targeting === 'all') {
+      return true;
+    }
+    
+    // If specific pages, check if current page matches
+    if (widget.page_targeting === 'specific' && widget.target_pages) {
+      var currentPath = window.location.pathname;
+      var targetPages = widget.target_pages.split(/[\n,]+/).map(function(p) { return p.trim(); }).filter(Boolean);
+      
+      for (var i = 0; i < targetPages.length; i++) {
+        var pattern = targetPages[i];
+        
+        // Convert wildcard pattern to regex
+        // e.g., /blog/* becomes /^\/blog\/.*/
+        var regexPattern = pattern
+          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')  // Escape special regex chars
+          .replace(/\*/g, '.*');  // Convert * to .*
+        
+        var regex = new RegExp('^' + regexPattern + '$');
+        if (regex.test(currentPath)) {
+          return true;
+        }
+        
+        // Also check exact match
+        if (currentPath === pattern) {
+          return true;
+        }
+      }
+      
+      // No match found
+      return false;
+    }
+    
+    return true;
+  }
+  
   // Check if widget triggers are met
   function checkWidgetTriggers(widget) {
-    // Check frequency control first
+    // Check page targeting first
+    if (!checkPageTargeting(widget)) {
+      debug('Widget blocked by page targeting:', widget.id);
+      return false;
+    }
+    
+    // Check frequency control
     if (!checkFrequency(widget)) {
       debug('Widget blocked by frequency control:', widget.id);
       return false;
@@ -1533,7 +1578,10 @@
 
   // Create widget pill HTML
   function createWidgetPill(widget) {
-    var position = widget.pill_position || 'bottom-right';
+    // Use mobile position on mobile devices if specified, otherwise use desktop position
+    var isMobile = detectDevice() === 'mobile';
+    var position = (isMobile && widget.mobile_position) ? widget.mobile_position : (widget.pill_position || 'bottom-right');
+    
     var positionStyles = {
       'bottom-right': 'bottom: 20px; right: 20px;',
       'bottom-left': 'bottom: 20px; left: 20px;',
@@ -1698,7 +1746,9 @@
       layout_type: widget.layout_type
     });
     
-    var position = widget.pill_position || 'bottom-right';
+    // Use mobile position on mobile devices if specified, otherwise use desktop position
+    var isMobile = detectDevice() === 'mobile';
+    var position = (isMobile && widget.mobile_position) ? widget.mobile_position : (widget.pill_position || 'bottom-right');
     var isRight = position.includes('right');
     var isBottom = position.includes('bottom');
     
