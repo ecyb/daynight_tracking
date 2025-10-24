@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.3.4
+ * Version: 3.3.1
  * Last Updated: 2025-10-24
  * 
  * Features:
@@ -1836,10 +1836,10 @@
     
     // Add style for input placeholders
     panelHtml += '<style>' +
-      '#is-widget-panel input::placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
-      '#is-widget-panel input::-webkit-input-placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
-      '#is-widget-panel input::-moz-placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
-      '#is-widget-panel input:-ms-input-placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input::placeholder { color: ' + popupTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input::-webkit-input-placeholder { color: ' + popupTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input::-moz-placeholder { color: ' + popupTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input:-ms-input-placeholder { color: ' + popupTextColor + '; opacity: 0.5; } ' +
       '</style>';
     
     panelHtml +=
