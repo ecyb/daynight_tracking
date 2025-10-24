@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.3.0
- * Last Updated: 2025-10-23
+ * Version: 3.3.4
+ * Last Updated: 2025-10-24
  * 
  * Features:
  * - Real-time pageview tracking
@@ -1834,6 +1834,14 @@
         '">';
     }
     
+    // Add style for input placeholders
+    panelHtml += '<style>' +
+      '#is-widget-panel input::placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input::-webkit-input-placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input::-moz-placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
+      '#is-widget-panel input:-ms-input-placeholder { color: ' + contentTextColor + '; opacity: 0.5; } ' +
+      '</style>';
+    
     panelHtml +=
       '<button id="is-widget-close" style="' +
       'position: absolute; ' +
@@ -2160,15 +2168,23 @@
           '<form id="is-widget-form" style="display: flex; flex-direction: column; gap: 12px;">' +
           '<input id="is-widget-name" type="text" name="name" placeholder="' + (content.name_placeholder || 'Your name (optional)') + '" style="' +
           'padding: 12px; ' +
-          'border: 1px solid #e5e7eb; ' +
+          'border: 1px solid ' + contentTextColor + '; ' +
+          'border-opacity: 0.2; ' +
+          'background: ' + contentTextColor + '10; ' +
+          'color: ' + contentTextColor + '; ' +
           'border-radius: 8px; ' +
           'font-size: 14px; ' +
+          'box-sizing: border-box; ' +
           '" />' +
           '<input id="is-widget-email" type="email" name="email" placeholder="' + (content.email_placeholder || 'Enter your email') + '" required style="' +
           'padding: 12px; ' +
-          'border: 1px solid #e5e7eb; ' +
+          'border: 1px solid ' + contentTextColor + '; ' +
+          'border-opacity: 0.2; ' +
+          'background: ' + contentTextColor + '10; ' +
+          'color: ' + contentTextColor + '; ' +
           'border-radius: 8px; ' +
           'font-size: 14px; ' +
+          'box-sizing: border-box; ' +
           '" />' +
           '<button type="submit" style="' +
           'background: ' + bgColor + '; ' +
