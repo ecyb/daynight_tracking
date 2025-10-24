@@ -2,8 +2,8 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 3.3.1
- * Last Updated: 2025-10-24
+ * Version: 3.3.0
+ * Last Updated: 2025-10-23
  * 
  * Features:
  * - Real-time pageview tracking
@@ -1544,6 +1544,10 @@
     var content = widget.content || {};
     var bgColor = content.background_color || '#667eea';
     var textColor = content.text_color || '#ffffff';
+    
+    // Use widget's entry animation for pill too
+    var pillAnimation = getAnimationCSS(widget.animation_in, 'in');
+    console.log('💊 Pill animation:', pillAnimation, 'from animation_in:', widget.animation_in);
 
     var pillHtml = '<div id="is-widget-pill" class="is-widget-pill" style="' +
       'position: fixed; ' +
@@ -1562,7 +1566,7 @@
       'align-items: center; ' +
       'gap: 8px; ' +
       'transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); ' +
-      'animation: is-pill-enter 0.5s cubic-bezier(0.4, 0, 0.2, 1); ' +
+      'animation: ' + pillAnimation + ' 0.6s cubic-bezier(0.4, 0, 0.2, 1); ' +
       '">' +
       (widget.pill_icon || '✨') + ' ' +
       widget.pill_text +
@@ -1599,80 +1603,265 @@
   
   // Play sound effect
   function playSound(soundType, widget) {
-    if (!widget.enable_sound || !soundType) return;
+    console.log('🔊 playSound called:', {
+      enable_sound: widget.enable_sound,
+      soundType: soundType,
+      widget_sound_type: widget.sound_type,
+      widget_sound_on_open: widget.sound_on_open,
+      sound_volume: widget.sound_volume
+    });
+    
+    if (!widget.enable_sound) {
+      console.log('🔇 Sound disabled: enable_sound =', widget.enable_sound);
+      return;
+    }
+    
+    // Support both old (sound_on_open) and new (sound_type) column names
+    var actualSoundType = soundType || widget.sound_type || widget.sound_on_open;
+    if (!actualSoundType || actualSoundType === 'none') {
+      console.log('🔇 No sound type specified or set to none');
+      return;
+    }
+    
+    console.log('🔊 Playing sound:', actualSoundType);
     
     try {
-      var audio = new Audio();
-      var soundMap = {
-        'bell': 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBzWM0vPTgjMGHm7A7+OZURE=',
-        'chime': 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBzWM0vPTgjMGHm7A7+OZURE=',
-        'success': 'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBzWM0vPTgjMGHm7A7+OZURE='
+      // Use Web Audio API for better sound generation
+      var AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) {
+        console.log('🔇 Web Audio API not supported');
+        return;
+      }
+      
+      var audioContext = new AudioContext();
+      var oscillator = audioContext.createOscillator();
+      var gainNode = audioContext.createGain();
+      
+      // Configure sound based on type
+      var soundConfig = {
+        notification: { freq1: 800, freq2: 600, duration: 0.15 },
+        ding: { freq1: 1000, duration: 0.2 },
+        pop: { freq1: 600, duration: 0.1 },
+        success: { freq1: 523, freq2: 659, duration: 0.2 },
+        celebrate: { freq1: 659, freq2: 784, duration: 0.3 },
+        chime: { freq1: 523, freq2: 784, duration: 0.25 }
       };
       
-      audio.src = soundMap[soundType] || soundMap.chime;
-      audio.volume = (widget.sound_volume || 50) / 100;
-      audio.play().catch(function(e) {
-        debug('Sound play failed:', e);
-      });
+      var config = soundConfig[actualSoundType] || soundConfig.notification;
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Support both decimal (0.5) and integer (50) volume formats
+      var volume = widget.sound_volume || 50;
+      if (volume > 1) {
+        volume = volume / 100; // Convert integer (0-100) to decimal (0-1)
+      }
+      gainNode.gain.setValueAtTime(volume / 2, audioContext.currentTime); // Divide by 2 for gentler volume
+      
+      // Set frequency
+      oscillator.frequency.setValueAtTime(config.freq1, audioContext.currentTime);
+      oscillator.type = 'sine';
+      
+      // Start playing
+      oscillator.start(audioContext.currentTime);
+      
+      // Play second note if configured (for notification, success, etc.)
+      if (config.freq2) {
+        oscillator.frequency.setValueAtTime(config.freq2, audioContext.currentTime + config.duration / 2);
+      }
+      
+      // Fade out at the end
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + config.duration);
+      
+      // Stop
+      oscillator.stop(audioContext.currentTime + config.duration);
+      
+      console.log('✅ Sound played successfully:', actualSoundType);
     } catch (e) {
-      debug('Sound error:', e);
+      console.error('❌ Sound error:', e);
     }
   }
   
   // Create widget panel HTML
   function createWidgetPanel(widget) {
+    // DEBUG: Log widget config
+    console.log('🎨 Creating widget panel with config:', {
+      id: widget.id,
+      size: widget.widget_size,
+      animation_in: widget.animation_in,
+      animation_out: widget.animation_out,
+      has_countdown: widget.has_countdown,
+      countdown_target: widget.countdown_target,
+      show_social_proof: widget.show_social_proof,
+      social_proof_count: widget.social_proof_count,
+      layout_type: widget.layout_type
+    });
+    
     var position = widget.pill_position || 'bottom-right';
     var isRight = position.includes('right');
     var isBottom = position.includes('bottom');
     
-    var layoutType = widget.layout_type || 'panel';
-    var widgetSize = getWidgetSize(widget.widget_size);
-    var animationClass = getAnimationCSS(widget.animation_in, 'in');
-
-    var positionStyles = isRight ? 'right: 20px;' : 'left: 20px;';
-    positionStyles += isBottom ? 'bottom: 20px;' : 'top: 20px;';
+    // Supported layout types: 'pill', 'modal', 'slide-in'
+    // pill = Compact popup (respects widget size)
+    // slide-in = Modal Side (medium, side position)
+    // modal = Modal Center Large (large, center position)
+    var layoutType = widget.layout_type || 'slide-in';
     
-    // For modal layout, center it
-    if (layoutType === 'modal') {
-      positionStyles = 'top: 50%; left: 50%; transform: translate(-50%, -50%);';
+    // Backwards compatibility: Map deprecated types
+    if (layoutType === 'bar' || layoutType === 'embedded') {
+      layoutType = 'slide-in';
     }
-    // For bar layout, make it full width at top or bottom
-    else if (layoutType === 'bar') {
-      positionStyles = isBottom ? 'bottom: 0; left: 0; right: 0;' : 'top: 0; left: 0; right: 0;';
-      widgetSize = '100%';
+    
+    // Set widget size based on layout type
+    var widgetSize;
+    if (layoutType === 'modal') {
+      // Modal Center - respects widget_size setting
+      var size = widget.widget_size || 'large';
+      console.log('📏 Modal widget_size from DB:', size);
+      if (size === 'small') {
+        widgetSize = '384px'; // max-w-sm
+      } else if (size === 'medium') {
+        widgetSize = '672px'; // max-w-2xl
+      } else {
+        // large - 90% width
+        widgetSize = '90%';
+      }
+      console.log('📏 Calculated widgetSize:', widgetSize);
+    } else if (layoutType === 'slide-in') {
+      // Modal Side - always medium
+      widgetSize = '420px';
+    } else {
+      // Pill - respects widget_size setting
+      widgetSize = getWidgetSize(widget.widget_size);
+    }
+    
+    var animationClass = getAnimationCSS(widget.animation_in, 'in');
+    
+    console.log('🎨 Widget styling:', {
+      layoutType: layoutType,
+      widgetSize: widgetSize,
+      animationClass: animationClass
+    });
+
+    var positionStyles;
+    
+    // For modal layout, center it properly without using transform
+    if (layoutType === 'modal') {
+      positionStyles = 'left: 50%; top: 50%;';
+    } else {
+      // For pill and slide-in, position at edge (using pill_position)
+      positionStyles = isRight ? 'right: 20px;' : 'left: 20px;';
+      positionStyles += isBottom ? 'bottom: 20px;' : 'top: 20px;';
     }
 
     var content = widget.content || {};
-    var contentHtml = generateWidgetContent(widget, content);
-
-    var panelHtml = '<div id="is-widget-panel" class="is-widget-panel" data-widget-id="' + widget.id + '" style="' +
-      'position: fixed; ' +
-      positionStyles +
-      'background: white; ' +
-      'border-radius: ' + (layoutType === 'bar' ? '0' : '16px') + '; ' +
-      'box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2); ' +
-      'padding: 24px; ' +
-      'max-width: ' + widgetSize + '; ' +
-      (layoutType === 'bar' ? '' : 'width: 90vw; ') +
-      'z-index: 999999; ' +
-      'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; ' +
-      'animation: ' + animationClass + ' 0.4s cubic-bezier(0.4, 0, 0.2, 1); ' +
-      'transform-origin: ' + (isRight ? 'right' : 'left') + ' ' + (isBottom ? 'bottom' : 'top') + '; ' +
+    var bgColor = content.background_color || '#667eea';
+    var textColor = content.text_color || '#ffffff';
+    
+    // Popup colors (for expanded panel)
+    var popupBg = content.popup_background || '#ffffff';
+    var popupTextColor = content.popup_text_color || '#1f2937';
+    
+    console.log('🎨 Popup colors:', {
+      popup_background: popupBg,
+      popup_text_color: popupTextColor
+    });
+    
+    // Create header with pill icon (larger for modal center)
+    var isLargeModal = (layoutType === 'modal');
+    var headerHtml = '<div style="' +
+      'display: flex; ' +
+      'align-items: center; ' +
+      (isLargeModal ? 'gap: 12px; ' : 'gap: 10px; ') +
+      (isLargeModal ? 'padding-bottom: 16px; ' : 'padding-bottom: 12px; ') +
+      (isLargeModal ? 'margin-bottom: 20px; ' : 'margin-bottom: 16px; ') +
       '">' +
+      '<div style="' +
+      (isLargeModal ? 'font-size: 36px; ' : 'font-size: 28px; ') +
+      'line-height: 1; ' +
+      '">' + (widget.pill_icon || '✨') + '</div>' +
+      '<div style="flex: 1;">' +
+      '<div style="' +
+      (isLargeModal ? 'font-size: 20px; ' : 'font-size: 15px; ') +
+      'font-weight: 700; ' +
+      'color: ' + popupTextColor + '; ' +
+      'margin-bottom: 2px; ' +
+      '">' + (widget.pill_text || 'Special Offer') + '</div>' +
+      '<div style="' +
+      (isLargeModal ? 'font-size: 14px; ' : 'font-size: 11px; ') +
+      'color: ' + popupTextColor + '; ' +
+      'opacity: 0.6; ' +
+      '">Limited time offer</div>' +
+      '</div>' +
+      '</div>';
+    
+    var contentHtml = generateWidgetContent(widget, content, layoutType, popupTextColor);
+
+    // For modal center, use wrapper for positioning + inner for animation
+    var panelHtml;
+    if (layoutType === 'modal') {
+      panelHtml = '<div id="is-widget-wrapper" style="position: fixed; ' + positionStyles + ' transform: translate(-50%, -50%); z-index: 999999;">' +
+        '<div id="is-widget-panel" class="is-widget-panel" data-widget-id="' + widget.id + '" style="' +
+        'background: ' + popupBg + '; ' +
+        'color: ' + popupTextColor + '; ' +
+        'border-radius: 18px; ' +
+        'box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05); ' +
+        'padding: 32px; ' +
+        'max-width: ' + widgetSize + '; ' +
+        'width: 90vw; ' +
+        'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; ' +
+        'animation: ' + animationClass + ' 0.4s cubic-bezier(0.4, 0, 0.2, 1); ' +
+        'transform-origin: center center; ' +
+        'overflow: hidden; ' +
+        '">';
+    } else {
+      panelHtml = '<div id="is-widget-panel" class="is-widget-panel" data-widget-id="' + widget.id + '" style="' +
+        'position: fixed; ' +
+        positionStyles +
+        'background: ' + popupBg + '; ' +
+        'color: ' + popupTextColor + '; ' +
+        'border-radius: 18px; ' +
+        'box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05); ' +
+        (isLargeModal ? 'padding: 32px; ' : 'padding: 20px; ') +
+        'max-width: ' + widgetSize + '; ' +
+        'width: 90vw; ' +
+        'z-index: 999999; ' +
+        'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; ' +
+        'animation: ' + animationClass + ' 0.4s cubic-bezier(0.4, 0, 0.2, 1); ' +
+        'transform-origin: ' + (isRight ? 'right' : 'left') + ' ' + (isBottom ? 'bottom' : 'top') + '; ' +
+        'overflow: hidden; ' +
+        '">';
+    }
+    
+    panelHtml +=
       '<button id="is-widget-close" style="' +
       'position: absolute; ' +
-      'top: 12px; ' +
-      'right: 12px; ' +
+      (isLargeModal ? 'top: 20px; ' : 'top: 16px; ') +
+      (isLargeModal ? 'right: 20px; ' : 'right: 16px; ') +
       'background: transparent; ' +
       'border: none; ' +
-      'font-size: 24px; ' +
+      'padding: 0; ' +
+      'margin: 0; ' +
+      (isLargeModal ? 'width: 36px; ' : 'width: 32px; ') +
+      (isLargeModal ? 'height: 36px; ' : 'height: 32px; ') +
+      (isLargeModal ? 'min-width: 36px; ' : 'min-width: 32px; ') +
+      (isLargeModal ? 'min-height: 36px; ' : 'min-height: 32px; ') +
+      'border-radius: 50%; ' +
+      (isLargeModal ? 'font-size: 20px; ' : 'font-size: 18px; ') +
       'color: #666; ' +
       'cursor: pointer; ' +
-      'padding: 0; ' +
+      'display: flex; ' +
+      'align-items: center; ' +
+      'justify-content: center; ' +
+      'transition: all 0.2s; ' +
       'line-height: 1; ' +
-      '">×</button>' +
+      'flex-shrink: 0; ' +
+      '" onmouseover="this.style.background=\'rgba(0, 0, 0, 0.1)\'" onmouseout="this.style.background=\'transparent\'">×</button>' +
+      headerHtml +
       contentHtml +
-      '</div>';
+      '</div>' +
+      (layoutType === 'modal' ? '</div>' : ''); // Close wrapper for modal center
     
     // Add modal backdrop if needed
     if (layoutType === 'modal') {
@@ -1684,133 +1873,251 @@
         'animation: is-fade-in 0.3s; ' +
         '"></div>' + panelHtml;
     }
-    
-    // Play entrance sound
-    playSound(widget.sound_type, widget);
 
     return panelHtml;
   }
 
   // Create countdown timer HTML
-  function createCountdownHTML(widget) {
-    if (!widget.has_countdown || !widget.countdown_target) return '';
+  function createCountdownHTML(widget, content) {
+    if (!widget.has_countdown) {
+      console.log('⏰ Countdown disabled: has_countdown =', widget.has_countdown);
+      return '';
+    }
     
-    var targetTime = new Date(widget.countdown_target).getTime();
+    // Support BOTH countdown types:
+    // 1. Fixed date/time (countdown_target or countdown_end_date)
+    // 2. Per-visitor duration (countdown_duration_seconds)
+    
+    var countdownTarget = widget.countdown_target || widget.countdown_end_date;
+    var countdownDuration = widget.countdown_duration_seconds;
+    
+    var targetTime;
+    
+    if (countdownTarget) {
+      // Fixed date/time countdown
+      console.log('⏰ Using fixed countdown target:', countdownTarget);
+      targetTime = new Date(countdownTarget).getTime();
+    } else if (countdownDuration) {
+      // Per-visitor duration countdown - calculate target time
+      console.log('⏰ Using duration-based countdown:', countdownDuration, 'seconds');
+      
+      // Check if we already stored a target time for this widget in this session
+      var storageKey = 'countdown_target_' + widget.id;
+      var storedTarget = sessionStorage.getItem(storageKey);
+      
+      if (storedTarget) {
+        targetTime = parseInt(storedTarget);
+        console.log('⏰ Using stored target time:', new Date(targetTime));
+      } else {
+        // First time showing - calculate target time from now
+        targetTime = Date.now() + (countdownDuration * 1000);
+        sessionStorage.setItem(storageKey, targetTime.toString());
+        console.log('⏰ Created new target time:', new Date(targetTime));
+      }
+    } else {
+      console.log('⏰ No countdown configuration found:', {
+        countdown_target: widget.countdown_target,
+        countdown_end_date: widget.countdown_end_date,
+        countdown_duration_seconds: widget.countdown_duration_seconds
+      });
+      return '';
+    }
+    
     var now = Date.now();
     var diff = Math.max(0, targetTime - now);
+    
+    if (diff === 0) {
+      console.log('⏰ Countdown expired');
+      return '';
+    }
     
     var days = Math.floor(diff / (1000 * 60 * 60 * 24));
     var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     var seconds = Math.floor((diff % (1000 * 60)) / 1000);
     
+    // Pad numbers with leading zeros
+    var pad = function(num) { return num < 10 ? '0' + num : num; };
+    
+    // Use popup background with slight darkening, fallback to light gray
+    var countdownBg = '#f9fafb'; // default
+    if (content && content.popup_background) {
+      // Create a slightly darker version of popup background
+      var popupBg = content.popup_background;
+      // Simple darkening by adding alpha black overlay effect via rgba
+      countdownBg = popupBg;
+    }
+    
     return '<div id="is-countdown" style="' +
-      'display: flex; gap: 12px; justify-content: center; margin: 16px 0; ' +
-      'font-family: monospace; font-weight: bold; font-size: 18px; ' +
+      'display: flex; gap: 6px; justify-content: center; align-items: center; margin: 12px 0; ' +
+      'background: ' + countdownBg + '; padding: 10px; border-radius: 8px; opacity: 0.95; ' +
       '">' +
-      (days > 0 ? '<div style="text-align: center;"><div style="font-size: 24px;">' + days + '</div><div style="font-size: 10px; color: #666;">DAYS</div></div>' : '') +
-      '<div style="text-align: center;"><div style="font-size: 24px;">' + hours + '</div><div style="font-size: 10px; color: #666;">HRS</div></div>' +
-      '<div style="text-align: center;"><div style="font-size: 24px;">' + minutes + '</div><div style="font-size: 10px; color: #666;">MIN</div></div>' +
-      '<div style="text-align: center;"><div style="font-size: 24px;">' + seconds + '</div><div style="font-size: 10px; color: #666;">SEC</div></div>' +
+      (days > 0 ? '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+        '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(days) + '</span>' +
+        '<span style="font-size: 11px; color: #666; font-weight: 500;">d</span>' +
+        '</div><span style="color: #666;">:</span>' : '') +
+      '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+        '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(hours) + '</span>' +
+        '<span style="font-size: 11px; color: #666; font-weight: 500;">h</span>' +
+      '</div><span style="color: #666;">:</span>' +
+      '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+        '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(minutes) + '</span>' +
+        '<span style="font-size: 11px; color: #666; font-weight: 500;">m</span>' +
+      '</div><span style="color: #666;">:</span>' +
+      '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+        '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(seconds) + '</span>' +
+        '<span style="font-size: 11px; color: #666; font-weight: 500;">s</span>' +
+      '</div>' +
       '</div>';
   }
   
   // Create social proof HTML
-  function createSocialProofHTML(widget) {
+  function createSocialProofHTML(widget, currentCount) {
     if (!widget.show_social_proof) return '';
     
     var proofType = widget.social_proof_type || 'views';
-    var count = widget.social_proof_count || 0;
+    // Support both old (social_proof_number) and new (social_proof_count) column names
+    var baseCount = parseInt(widget.social_proof_count || widget.social_proof_number) || 0;
     
-    var messages = {
-      'views': '👀 ' + count + ' people viewing',
-      'purchases': '🛒 ' + count + ' purchased today',
-      'signups': '✍️ ' + count + ' signed up today',
-      'custom': widget.social_proof_message || ''
+    // Use current count if provided (for auto-increment), otherwise use base count
+    var count = currentCount !== undefined ? currentCount : baseCount;
+    
+    if (count === 0 && proofType !== 'custom') return '';
+    
+    // Map database values to display values
+    var typeMap = {
+      'view_count': 'views',
+      'purchase_count': 'purchases',
+      'subscriber_count': 'signups'
     };
+    proofType = typeMap[proofType] || proofType;
     
-    return '<div style="' +
-      'background: #f3f4f6; padding: 8px 12px; border-radius: 6px; ' +
-      'font-size: 12px; color: #666; text-align: center; margin-top: 12px; ' +
-      '">' + messages[proofType] + '</div>';
+    var message = '';
+    switch (proofType) {
+      case 'views':
+        message = '👁️ <strong>' + count + '</strong> people viewing right now';
+        break;
+      case 'purchases':
+        message = '🛒 <strong>' + count + '</strong> purchased today';
+        break;
+      case 'signups':
+        message = '✍️ <strong>' + count + '</strong> signed up today';
+        break;
+      case 'custom':
+        message = widget.social_proof_message || '';
+        break;
+      default:
+        message = '👁️ <strong>' + count + '</strong> people viewing';
+    }
+    
+    if (!message) return '';
+    
+    return '<div id="is-social-proof" style="' +
+      'color: #666; ' +
+      'padding: 8px 12px; ' +
+      'border-radius: 6px; ' +
+      'font-size: 12px; ' +
+      'text-align: center; ' +
+      'margin-top: 12px; ' +
+      '">' + message + '</div>';
   }
   
   // Generate content based on widget type
-  function generateWidgetContent(widget, content) {
+  function generateWidgetContent(widget, content, layoutType, popupTextColor) {
     var type = widget.widget_type;
     var bgColor = content.background_color || '#667eea';
     var textColor = content.text_color || '#ffffff';
+    var isLargeModal = (layoutType === 'modal');
     
-    var countdownHTML = createCountdownHTML(widget);
-    var socialProofHTML = createSocialProofHTML(widget);
+    // Use popup text color for content text, fallback to dark gray
+    var contentTextColor = popupTextColor || '#1f2937';
+    var contentSubtextColor = popupTextColor || '#666666';
+    
+    // Ensure these return empty strings, never undefined
+    var countdownHTML = createCountdownHTML(widget, content) || '';
+    var socialProofHTML = createSocialProofHTML(widget) || '';
+    
+    console.log('📝 Generated content elements:', {
+      type: type,
+      layoutType: layoutType,
+      isLargeModal: isLargeModal,
+      countdownHTML: countdownHTML.length > 0 ? 'YES (' + countdownHTML.length + ' chars)' : 'NO',
+      socialProofHTML: socialProofHTML.length > 0 ? 'YES (' + socialProofHTML.length + ' chars)' : 'NO',
+      bgColor: bgColor,
+      textColor: textColor
+    });
     
     switch (type) {
       case 'offer':
-        return '<div style="text-align: center;">' +
-          '<div style="font-size: 32px; margin-bottom: 12px;">' + (content.icon || '🎉') + '</div>' +
-          '<h3 style="margin: 0 0 8px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Special Offer!') + '</h3>' +
-          '<p style="margin: 0 0 16px 0; color: #666; font-size: 14px;">' + (content.description || 'Limited time offer') + '</p>' +
+        return '<div>' +
+          '<h2 style="margin: 0 0 ' + (isLargeModal ? '12px' : '8px') + ' 0; color: ' + contentTextColor + '; font-size: ' + (isLargeModal ? '28px' : '22px') + '; font-weight: 700; text-align: center;">' + (content.title || 'Special Offer!') + '</h2>' +
+          '<p style="margin: 0 0 ' + (isLargeModal ? '18px' : '14px') + ' 0; color: ' + contentTextColor + '; opacity: 0.7; font-size: ' + (isLargeModal ? '16px' : '14px') + '; line-height: 1.5; text-align: center;">' + (content.description || 'Limited time offer') + '</p>' +
           countdownHTML +
-          (content.promo_code ? '<div style="background: #f3f4f6; padding: 12px; border-radius: 8px; font-weight: 600; margin-bottom: 16px; font-size: 18px; letter-spacing: 1px;">' + content.promo_code + '</div>' : '') +
+          (content.promo_code ? '<div style="background: #f3f4f6; padding: ' + (isLargeModal ? '12px 16px' : '10px 12px') + '; border-radius: 8px; font-weight: 600; margin-bottom: ' + (isLargeModal ? '16px' : '12px') + '; font-size: ' + (isLargeModal ? '18px' : '16px') + '; letter-spacing: 0.5px; text-align: center;">' + content.promo_code + '</div>' : '') +
           '<a id="is-widget-cta-offer" href="' + (content.cta_url || '#') + '" target="_blank" style="' +
           'display: block; ' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
-          'padding: 12px 32px; ' +
+          'padding: ' + (isLargeModal ? '16px 28px' : '14px 24px') + '; ' +
           'border-radius: 8px; ' +
           'font-weight: 600; ' +
           'cursor: pointer; ' +
           'width: 100%; ' +
-          'font-size: 16px; ' +
+          'box-sizing: border-box; ' +
+          'font-size: ' + (isLargeModal ? '18px' : '16px') + '; ' +
           'text-decoration: none; ' +
           'text-align: center; ' +
+          'transition: all 0.2s; ' +
           '">' + (content.cta_text || 'Claim Offer') + '</a>' +
           socialProofHTML +
           '</div>';
 
       case 'contact':
         var contactOptions = content.options || [];
+        var contactHTML = contactOptions.map(function(option) {
+          if (!option || !option.url || !option.label) return '';
+          return '<a href="' + option.url + '" target="_blank" onclick="window.InsightStreamAnalytics.widgetContactClick(\'' + (option.type || 'other') + '\')" style="' +
+          'display: flex; ' +
+          'align-items: center; ' +
+          'gap: 12px; ' +
+          'padding: 14px; ' +
+          'background: #f9fafb; ' +
+          'border-radius: 8px; ' +
+          'text-decoration: none; ' +
+          'color: ' + contentTextColor + '; ' +
+          'transition: all 0.2s; ' +
+          '">' +
+          '<span style="font-size: 20px;">' + (option.icon || '📞') + '</span>' +
+          '<span style="font-weight: 500;">' + option.label + '</span>' +
+          '</a>';
+        }).join('');
+        
         return '<div>' +
-          '<h3 style="margin: 0 0 16px 0; color: #1a1a1a; font-size: 18px; text-align: center;">' + (content.title || 'Get in Touch') + '</h3>' +
-          '<div style="display: flex; flex-direction: column; gap: 12px;">' +
-          contactOptions.map(function(option) {
-            return '<a href="' + option.url + '" target="_blank" onclick="window.InsightStreamAnalytics.widgetContactClick(\'' + option.type + '\')" style="' +
-            'display: flex; ' +
-            'align-items: center; ' +
-            'gap: 12px; ' +
-            'padding: 14px; ' +
-            'background: #f9fafb; ' +
-            'border-radius: 8px; ' +
-            'text-decoration: none; ' +
-            'color: #1a1a1a; ' +
-            'transition: all 0.2s; ' +
-            '">' +
-            '<span style="font-size: 20px;">' + (option.icon || '📞') + '</span>' +
-            '<span style="font-weight: 500;">' + option.label + '</span>' +
-            '</a>';
-          }).join('') +
-          '</div>' +
+          '<h3 style="margin: 0 0 16px 0; color: ' + contentTextColor + '; font-size: 18px; text-align: center;">' + (content.title || 'Get in Touch') + '</h3>' +
+          (contactHTML ? '<div style="display: flex; flex-direction: column; gap: 12px;">' + contactHTML + '</div>' : '<p style="text-align: center; color: ' + contentTextColor + '; opacity: 0.6;">No contact options available</p>') +
           '</div>';
 
       case 'action':
-        return '<div style="text-align: center;">' +
-          '<h3 style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 20px;">' + (content.title || 'Take Action') + '</h3>' +
-          '<p style="margin: 0 0 20px 0; color: #666; font-size: 14px;">' + (content.description || '') + '</p>' +
+        return '<div>' +
+          '<h2 style="margin: 0 0 8px 0; color: ' + contentTextColor + '; font-size: 22px; font-weight: 700; text-align: center;">' + (content.title || 'Take Action') + '</h2>' +
+          '<p style="margin: 0 0 14px 0; color: ' + contentTextColor + '; opacity: 0.7; font-size: 14px; line-height: 1.5; text-align: center;">' + (content.description || '') + '</p>' +
           countdownHTML +
           '<a id="is-widget-cta-action" href="' + (content.cta_url || '#') + '" target="_blank" style="' +
           'display: block; ' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
-          'padding: 14px 32px; ' +
+          'padding: 14px 24px; ' +
           'border-radius: 8px; ' +
           'font-weight: 600; ' +
           'cursor: pointer; ' +
           'width: 100%; ' +
+          'box-sizing: border-box; ' +
           'font-size: 16px; ' +
           'text-decoration: none; ' +
           'text-align: center; ' +
+          'transition: all 0.2s; ' +
           '">' + (content.cta_text || 'Get Started') + '</a>' +
           socialProofHTML +
           '</div>';
@@ -1823,47 +2130,58 @@
           '</div>' +
           '<div style="font-size: 24px; color: #fbbf24; margin-bottom: 8px;">★★★★★</div>' +
           '</div>' +
-          '<p style="margin: 0 0 12px 0; color: #1a1a1a; font-size: 15px; font-style: italic; text-align: center;">"' + (content.description || content.quote || 'Amazing service!') + '"</p>' +
-          '<p style="margin: 0; color: #666; font-size: 14px; text-align: center;"><strong>' + (content.author_name || content.name || 'Customer') + '</strong>' +
+          '<p style="margin: 0 0 12px 0; color: ' + contentTextColor + '; font-size: 15px; font-style: italic; text-align: center;">"' + (content.description || content.quote || 'Amazing service!') + '"</p>' +
+          '<p style="margin: 0; color: ' + contentTextColor + '; opacity: 0.7; font-size: 14px; text-align: center;"><strong>' + (content.author_name || content.name || 'Customer') + '</strong>' +
           (content.author_title ? '<br/><span style="font-size: 12px;">' + content.author_title + '</span>' : '') + '</p>' +
           (content.cta_text ? '<a id="is-widget-cta-testimonial" href="' + (content.cta_url || '#') + '" target="_blank" style="' +
           'display: block; ' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
-          'padding: 12px 32px; ' +
+          'padding: 14px 24px; ' +
           'border-radius: 8px; ' +
           'font-weight: 600; ' +
           'cursor: pointer; ' +
           'width: 100%; ' +
+          'box-sizing: border-box; ' +
           'margin-top: 16px; ' +
           'font-size: 16px; ' +
           'text-decoration: none; ' +
           'text-align: center; ' +
+          'transition: all 0.2s; ' +
           '">' + content.cta_text + '</a>' : '') +
           '</div>';
 
       case 'form':
         return '<div>' +
-          '<h3 style="margin: 0 0 16px 0; color: #1a1a1a; font-size: 18px; text-align: center;">' + (content.title || 'Stay Updated') + '</h3>' +
+          '<h2 style="margin: 0 0 8px 0; color: ' + contentTextColor + '; font-size: 22px; font-weight: 700; text-align: center;">' + (content.title || 'Stay Updated') + '</h2>' +
+          (content.description ? '<p style="margin: 0 0 14px 0; color: ' + contentTextColor + '; opacity: 0.7; font-size: 14px; line-height: 1.5; text-align: center;">' + content.description + '</p>' : '') +
           countdownHTML +
           '<form id="is-widget-form" style="display: flex; flex-direction: column; gap: 12px;">' +
+          '<input id="is-widget-name" type="text" name="name" placeholder="' + (content.name_placeholder || 'Your name (optional)') + '" style="' +
+          'padding: 12px; ' +
+          'border: 1px solid #e5e7eb; ' +
+          'border-radius: 8px; ' +
+          'font-size: 14px; ' +
+          '" />' +
           '<input id="is-widget-email" type="email" name="email" placeholder="' + (content.email_placeholder || 'Enter your email') + '" required style="' +
           'padding: 12px; ' +
           'border: 1px solid #e5e7eb; ' +
           'border-radius: 8px; ' +
           'font-size: 14px; ' +
           '" />' +
-          (content.show_name ? '<input id="is-widget-name" type="text" name="name" placeholder="Your name" style="padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 14px;" />' : '') +
           '<button type="submit" style="' +
           'background: ' + bgColor + '; ' +
           'color: ' + textColor + '; ' +
           'border: none; ' +
-          'padding: 12px; ' +
+          'padding: 14px 24px; ' +
           'border-radius: 8px; ' +
           'font-weight: 600; ' +
           'cursor: pointer; ' +
+          'width: 100%; ' +
+          'box-sizing: border-box; ' +
           'font-size: 16px; ' +
+          'transition: all 0.2s; ' +
           '">' + (content.submit_text || 'Submit') + '</button>' +
           '</form>' +
           socialProofHTML +
@@ -1878,6 +2196,8 @@
   function showWidgetPill(widget) {
     if (widgetState.activeWidget) return; // Don't show if another widget is active
 
+    console.log('💊 Showing widget pill for:', widget.id);
+
     var pillHtml = createWidgetPill(widget);
     var container = document.createElement('div');
     container.innerHTML = pillHtml;
@@ -1885,6 +2205,10 @@
 
     widgetState.activeWidget = widget;
     widgetState.shownWidgets.add(widget.id);
+
+    // Play entrance sound when pill appears
+    console.log('💊 Attempting to play sound...');
+    playSound(widget.sound_type || widget.sound_on_open, widget);
 
     // Track view
     trackWidgetInteraction(widget.id, 'view', {});
@@ -1912,7 +2236,9 @@
   function expandWidget(widget) {
     var pill = document.getElementById('is-widget-pill');
     if (pill) {
-      pill.style.animation = 'is-pill-exit 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
+      var exitAnimation = getAnimationCSS(widget.animation_out, 'out');
+      pill.style.animation = exitAnimation + ' 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
+      console.log('💊 Pill exit animation:', exitAnimation, 'from animation_out:', widget.animation_out);
       setTimeout(function() {
         pill.remove();
       }, 300);
@@ -1942,21 +2268,33 @@
     document.body.appendChild(container.firstChild);
 
     // Start countdown timer if enabled
-    if (widget.has_countdown && widget.countdown_target) {
+    var countdownTarget = widget.countdown_target || widget.countdown_end_date;
+    var countdownDuration = widget.countdown_duration_seconds;
+    
+    if (widget.has_countdown && (countdownTarget || countdownDuration)) {
+      // Calculate target time (same logic as createCountdownHTML)
+      var targetTime;
+      
+      if (countdownTarget) {
+        targetTime = new Date(countdownTarget).getTime();
+      } else if (countdownDuration) {
+        var storageKey = 'countdown_target_' + widget.id;
+        var storedTarget = sessionStorage.getItem(storageKey);
+        targetTime = storedTarget ? parseInt(storedTarget) : (Date.now() + countdownDuration * 1000);
+      }
+      
       var countdownInterval = setInterval(function() {
         var countdownEl = document.getElementById('is-countdown');
         if (!countdownEl) {
           clearInterval(countdownInterval);
           return;
         }
-        
-        var targetTime = new Date(widget.countdown_target).getTime();
         var now = Date.now();
         var diff = Math.max(0, targetTime - now);
         
         if (diff === 0) {
           clearInterval(countdownInterval);
-          countdownEl.innerHTML = '<div style="color: #ef4444; font-weight: bold;">EXPIRED</div>';
+          countdownEl.innerHTML = '<div style="color: #ef4444; font-weight: bold; text-align: center; padding: 12px;">⏰ OFFER EXPIRED</div>';
           return;
         }
         
@@ -1965,13 +2303,80 @@
         var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         var seconds = Math.floor((diff % (1000 * 60)) / 1000);
         
-        countdownEl.innerHTML = '<div style="display: flex; gap: 12px; justify-content: center;">' +
-          (days > 0 ? '<div style="text-align: center;"><div style="font-size: 24px;">' + days + '</div><div style="font-size: 10px; color: #666;">DAYS</div></div>' : '') +
-          '<div style="text-align: center;"><div style="font-size: 24px;">' + hours + '</div><div style="font-size: 10px; color: #666;">HRS</div></div>' +
-          '<div style="text-align: center;"><div style="font-size: 24px;">' + minutes + '</div><div style="font-size: 10px; color: #666;">MIN</div></div>' +
-          '<div style="text-align: center;"><div style="font-size: 24px;">' + seconds + '</div><div style="font-size: 10px; color: #666;">SEC</div></div>' +
+        // Pad numbers with leading zeros
+        var pad = function(num) { return num < 10 ? '0' + num : num; };
+        
+        countdownEl.innerHTML = 
+          (days > 0 ? '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+            '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(days) + '</span>' +
+            '<span style="font-size: 11px; color: #666; font-weight: 500;">d</span>' +
+            '</div><span style="color: #666;">:</span>' : '') +
+          '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+            '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(hours) + '</span>' +
+            '<span style="font-size: 11px; color: #666; font-weight: 500;">h</span>' +
+          '</div><span style="color: #666;">:</span>' +
+          '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+            '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(minutes) + '</span>' +
+            '<span style="font-size: 11px; color: #666; font-weight: 500;">m</span>' +
+          '</div><span style="color: #666;">:</span>' +
+          '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+            '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(seconds) + '</span>' +
+            '<span style="font-size: 11px; color: #666; font-weight: 500;">s</span>' +
           '</div>';
       }, 1000);
+    }
+
+    // Start social proof auto-increment if enabled
+    if (widget.show_social_proof) {
+      var baseCount = parseInt(widget.social_proof_count || widget.social_proof_number) || 0;
+      var currentSocialCount = baseCount;
+      var proofType = widget.social_proof_type || 'views';
+      
+      // Map database values to display values
+      var typeMap = {
+        'view_count': 'views',
+        'purchase_count': 'purchases',
+        'subscriber_count': 'signups'
+      };
+      proofType = typeMap[proofType] || proofType;
+      
+      // Auto-increment every 3-8 seconds (random for realism)
+      var socialProofInterval = setInterval(function() {
+        var socialProofEl = document.getElementById('is-social-proof');
+        if (!socialProofEl) {
+          clearInterval(socialProofInterval);
+          return;
+        }
+        
+        // Increment by 1-3 randomly
+        var increment = Math.floor(Math.random() * 3) + 1;
+        currentSocialCount += increment;
+        
+        // Update the display
+        var message = '';
+        switch (proofType) {
+          case 'views':
+            message = '👁️ <strong>' + currentSocialCount + '</strong> people viewing right now';
+            break;
+          case 'purchases':
+            message = '🛒 <strong>' + currentSocialCount + '</strong> purchased today';
+            break;
+          case 'signups':
+            message = '✍️ <strong>' + currentSocialCount + '</strong> signed up today';
+            break;
+          default:
+            message = '👁️ <strong>' + currentSocialCount + '</strong> people viewing';
+        }
+        
+        socialProofEl.innerHTML = message;
+        
+        // Add a subtle pulse animation
+        socialProofEl.style.animation = 'none';
+        setTimeout(function() {
+          socialProofEl.style.animation = 'is-pulse 0.4s ease-out';
+        }, 10);
+        
+      }, Math.floor(Math.random() * 5000) + 3000); // Random 3-8 seconds
     }
 
     // Add close handler
@@ -2032,6 +2437,7 @@
   // Close widget
   function closeWidget(widget) {
     var panel = document.getElementById('is-widget-panel');
+    var wrapper = document.getElementById('is-widget-wrapper');
     var backdrop = document.getElementById('is-widget-backdrop');
     
     if (panel) {
@@ -2040,7 +2446,12 @@
       panel.style.animation = exitAnimation + ' 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards';
       
       setTimeout(function() {
-        panel.remove();
+        // Remove wrapper if it exists (modal center), otherwise remove panel
+        if (wrapper) {
+          wrapper.remove();
+        } else {
+          panel.remove();
+        }
         if (backdrop) backdrop.remove();
         widgetState.activeWidget = null;
         
@@ -2063,7 +2474,157 @@
 
     var widget = findNextWidget();
     if (widget) {
-      showWidgetPill(widget);
+      // Check layout type to determine how to show widget
+      var layoutType = widget.layout_type || 'pill';
+      
+      // Backwards compatibility: Map deprecated types to supported ones
+      // Supported types: 'pill', 'modal', 'slide-in'
+      // Deprecated types: 'bar', 'embedded' → treated as 'slide-in'
+      if (layoutType === 'bar' || layoutType === 'embedded') {
+        layoutType = 'slide-in';
+      }
+      
+      console.log('🎯 Showing widget with layout type:', layoutType);
+      
+      // PILL layout: Show pill button first (2-step: pill → click → expand)
+      if (layoutType === 'pill') {
+        showWidgetPill(widget);
+      } 
+      // All other layouts: Skip pill, show full widget directly
+      else {
+        console.log('⚡ Skipping pill, showing full widget directly');
+        widgetState.activeWidget = widget;
+        widgetState.shownWidgets.add(widget.id);
+        
+        // Play entrance sound
+        playSound(widget.sound_type || widget.sound_on_open, widget);
+        
+        // Track view
+        trackWidgetInteraction(widget.id, 'view', {});
+        
+        // Record impression for frequency control
+        recordImpression(widget);
+        
+        // Show full widget directly
+        var panelHtml = createWidgetPanel(widget);
+        var container = document.createElement('div');
+        container.innerHTML = panelHtml;
+        
+        // Handle modal backdrop if present
+        if (layoutType === 'modal') {
+          var backdrop = container.querySelector('#is-widget-backdrop');
+          if (backdrop) {
+            document.body.appendChild(backdrop);
+            backdrop.addEventListener('click', function() {
+              closeWidget(widget);
+            });
+          }
+        }
+        
+        document.body.appendChild(container.firstChild);
+        
+        // Start countdown timer if enabled
+        var countdownTarget = widget.countdown_target || widget.countdown_end_date;
+        var countdownDuration = widget.countdown_duration_seconds;
+        
+        if (widget.has_countdown && (countdownTarget || countdownDuration)) {
+          // Calculate target time (same logic as createCountdownHTML)
+          var targetTime;
+          
+          if (countdownTarget) {
+            targetTime = new Date(countdownTarget).getTime();
+          } else if (countdownDuration) {
+            var storageKey = 'countdown_target_' + widget.id;
+            var storedTarget = sessionStorage.getItem(storageKey);
+            targetTime = storedTarget ? parseInt(storedTarget) : (Date.now() + countdownDuration * 1000);
+          }
+          
+          var countdownInterval = setInterval(function() {
+            var countdownEl = document.getElementById('is-countdown');
+            if (!countdownEl) {
+              clearInterval(countdownInterval);
+              return;
+            }
+            var now = Date.now();
+            var diff = Math.max(0, targetTime - now);
+            
+            if (diff === 0) {
+              clearInterval(countdownInterval);
+              countdownEl.innerHTML = '<div style="color: #ef4444; font-weight: bold; text-align: center; padding: 12px;">⏰ OFFER EXPIRED</div>';
+              return;
+            }
+            
+            var days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            var seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            var pad = function(num) { return num < 10 ? '0' + num : num; };
+            
+            countdownEl.innerHTML = 
+              (days > 0 ? '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+                '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(days) + '</span>' +
+                '<span style="font-size: 11px; color: #666; font-weight: 500;">d</span>' +
+                '</div><span style="color: #666;">:</span>' : '') +
+              '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+                '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(hours) + '</span>' +
+                '<span style="font-size: 11px; color: #666; font-weight: 500;">h</span>' +
+              '</div><span style="color: #666;">:</span>' +
+              '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+                '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(minutes) + '</span>' +
+                '<span style="font-size: 11px; color: #666; font-weight: 500;">m</span>' +
+              '</div><span style="color: #666;">:</span>' +
+              '<div style="display: flex; align-items: baseline; gap: 4px;">' +
+                '<span style="font-size: 20px; font-weight: bold; font-family: monospace;">' + pad(seconds) + '</span>' +
+                '<span style="font-size: 11px; color: #666; font-weight: 500;">s</span>' +
+              '</div>';
+          }, 1000);
+        }
+        
+        // Add close handler
+        var closeBtn = document.getElementById('is-widget-close');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', function() {
+            closeWidget(widget);
+          });
+        }
+        
+        // Add form submit handler
+        var form = document.getElementById('is-widget-form');
+        if (form) {
+          form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var email = document.getElementById('is-widget-email').value;
+            var name = document.getElementById('is-widget-name') ? document.getElementById('is-widget-name').value : '';
+            
+            saveFormSubmission(widget.id, email, name);
+            trackWidgetInteraction(widget.id, 'submit', { email: email });
+            localStorage.setItem('widget_frequency_' + widget.id + '_converted', 'true');
+            playSound('success', widget);
+            
+            var formEl = e.target;
+            formEl.innerHTML = '<div style="text-align: center; color: #10b981; padding: 20px;">' +
+              '<div style="font-size: 48px; margin-bottom: 12px;">✓</div>' +
+              '<div style="font-size: 18px; font-weight: 600;">Thanks for submitting!</div>' +
+              '<div style="font-size: 14px; margin-top: 8px; color: #666;">We\'ll be in touch soon.</div>' +
+              '</div>';
+            
+            setTimeout(function() {
+              closeWidget(widget);
+            }, 2000);
+          });
+        }
+        
+        // Add CTA button handlers
+        var ctaButtons = document.querySelectorAll('[id^="is-widget-cta-"]');
+        ctaButtons.forEach(function(btn) {
+          btn.addEventListener('click', function() {
+            trackWidgetInteraction(widget.id, 'click', {});
+            localStorage.setItem('widget_frequency_' + widget.id + '_converted', 'true');
+            closeWidget(widget);
+          });
+        });
+      }
     }
   }
 
@@ -2151,7 +2712,14 @@
     
     // Legacy panel animations (backwards compatibility)
     '@keyframes is-panel-enter { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } } ' +
-    '@keyframes is-panel-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.9); } }';
+    '@keyframes is-panel-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.9); } } ' +
+    
+    // Pulse animation for social proof updates
+    '@keyframes is-pulse { ' +
+      '0% { transform: scale(1); } ' +
+      '50% { transform: scale(1.05); } ' +
+      '100% { transform: scale(1); } ' +
+    '}';
   document.head.appendChild(style);
 
   // Public API
