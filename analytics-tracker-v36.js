@@ -2,7 +2,7 @@
  * 🎬 Insight Stream Analytics Tracker - FINAL VERSION
  * Complete analytics tracking with DOM capture, SPA navigation, and session replay
  * 
- * Version: 4.1.0
+ * Version: 4.2.0
  * Last Updated: 2025-10-24
  * 
  * Features:
